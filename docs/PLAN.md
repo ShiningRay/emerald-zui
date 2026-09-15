@@ -169,7 +169,7 @@ end
 |---|---|---|
 | D1 | **独立扩展仓**，非 emerald 内部分支 | 用户定调（2026-09-15）。Emerald 是 OS 产品仓保稳定，ZUI 是范式实验；隔离 emerald E7 动工期的 shell.rb 交叉。代价：依赖 DesktopShell 内部方法的继承复用（§5 反哺评估） |
 | D2 | **相机 = 单容器 CSS transform**，非逐窗投影 | `offsetLeft` 是布局坐标不受 transform 影响（窗口定位天然是世界坐标）；transform 直写 DOM = 单 Effect 订阅，零重渲染；GPU 合成器加速 |
-| D3 | **三条语义决策（暂定推荐默认，待拍板）**：① 窗口随相机缩放（Pad++ 正统）② 最大化 = camera fit ③ 缩放范围有限 0.1×–4× | ① 保 ZUI 辨识度；② 保留肌肉记忆入口且天然适配无限画布；③ 防迷路（ZUI 两大历史死因之一） |
+| D3 | **三条语义决策（2026-09-15 拍板）**：① 窗口随相机缩放（Pad++ 正统）② 最大化 = camera fit ③ 缩放范围有限 0.1×–4× | ① 保 ZUI 辨识度；② 保留肌肉记忆入口且天然适配无限画布；③ 防迷路（ZUI 两大历史死因之一） |
 | D4 | **经典模式 = 相机退化形态一套代码** | 不设平行实现；`{0,0,1}` + viewport 钳制即经典桌面，Z2 逐像素回归验收 |
 | D5 | **不猴补三仓**，缺口走反哺通道 | 与 emerald PLAN「不 fork、不猴子补丁」同纪律；beryl `drag_scale` 走正式 PR（§5） |
 
@@ -226,3 +226,16 @@ end
   Service 生命周期 + README）；citrine 无新提交（`75d8bab`）。本仓
   `bundle exec rake` 双绿，DesktopShell 继承缝（view/wallpaper/icon_grid/
   each_window_frame/menubar/tray/toast_stack）核对无漂移。
+- **2026-09-15 Z0 落地（32 项全绿）**：D3 三决策按推荐默认拍板（见 §4）。
+  ① `camera.rb`——Camera 全 API（锚点缩放/平移/fit/双向换算/钳制 0.1×–4×/
+  F6 四 op 守卫），22 项测试锁契约。**契约裁决**：原 fit 字面公式与
+  换算恒等式不自洽，按恒等式 + 中心对齐实现（`x' = vw/(2z') − cx`，
+  注释留痕于 camera.rb:78-84）。② `shell.rb`——ZuiShell 两层组装
+  （世界层/HUD 层），相机 Effect 直写 DOM 零重渲染，滚轮锚点缩放 +
+  空白拖拽平移（落点回写），覆写 `current_viewport` 恒 nil 关掉 wm
+  钳制/吸附（§3.3），9 项测试。③ **beryl `drag_scale` 已提 PR
+  [#2](https://github.com/ShiningRay/beryl/pull/2)**（纯 CRuby
+  `Beryl::DragGeometry.compute` + prop，94 项全绿）——Z1 关键路径外部
+  依赖提前解除。
+  **Z0 待人工验收**：浏览器手感（缩到全景再放大回窗口是否比 ⌘` 快）、
+  滚轮在可滚动内容上误缩放、offsetLeft 前提验证。
