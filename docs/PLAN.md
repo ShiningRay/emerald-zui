@@ -214,11 +214,15 @@ end
 | F6 无限重入 | camera/wm 变更只从事件回调进入；wm 自带 `assert_outside_effect!` |
 | F4 子组件自焚 | app 实例归 registry（emerald D3 继承）；LOD 不调用 content 插槽 ≠ 销毁实例 |
 | beryl 拖拽漂移 | §3.5 双轨：正式 PR（关键路径第一天提）+ 可选过渡方案 |
-| 与 emerald E7（Service/View 重构）交叉 | 本仓不共享 emerald 文件；ZuiShell 只继承公开形态，emerald 侧 view 拆层若变，编译即断即修 |
+| 与 emerald E7（Service/View 重构）交叉 | **E7 已随上游同步落地**（emerald `611371a`，2026-09-15）：shell.rb +175 行但 view/wallpaper/icon_grid/each_window_frame 等继承缝逐一核对未变，本仓 rake 双绿。残余关注点：E7 带来 pkg/Service 新层，ZUI 的 .emz 分发形态可提前评估（原列 v 后评估项） |
 | **迷路（ZUI 历史死因）** | 非可选项内建：⌘0 全景 + 有限缩放范围 + 任务栏飞行 |
 | 切模式后坐标系语义混乱 | v1 切模式重置窗口布局 + Toast 明示；不做双坐标系迁移 |
 | 用户晕动/不习惯 | Settings 开关默认 classic；ZUI 需主动开启 |
 
 ## 9. 实施记录
 
-（动工后填写）
+- **2026-09-15 上游同步**：beryl → `f0cd5e8`（菜单坐标 Event#raw 修复等 4 项）；
+  emerald → `17ec8a2`（**E7 落地**：.emz 包管线 / Installer / 编译缓存 /
+  Service 生命周期 + README）；citrine 无新提交（`75d8bab`）。本仓
+  `bundle exec rake` 双绿，DesktopShell 继承缝（view/wallpaper/icon_grid/
+  each_window_frame/menubar/tray/toast_stack）核对无漂移。
