@@ -363,6 +363,28 @@ end
   citrine 双绑 dblclick，反哺 = PR #2 合并后删 beryl setup_dblclick。
   **浏览器验收待办**：morph 幽灵动画观感、tile 拖拽手感、去重守卫对真实
   双击事件流覆盖、Clock 双形态同步走字。
+- **2026-09-16 Z1.5 浏览器验收（通过）**：两个上游阻塞先修——① citrine
+  dispatch_callable（PR #30 已并 main，本地工作树 cherry-pick -n 跟进）；
+  ② beryl chrome 按钮 camelCase `e.stopPropagation`（Citrine::Event 只有
+  snake_case，浏览器点最小化即 raise、morph 入口全断）→ PR
+  [#4](https://github.com/ShiningRay/beryl/pull/4)。验收（逐帧 rAF 采样
+  20 帧/315ms 飞行/收尾滞后 19ms）：
+  - **形变**：ghost scale 1 → 0.275/0.2588（= 88/320 与 88/340，**非均匀
+    = 可见变形**）单调递减，内容透明度 1 → 0.12 交叉淡化，终点 0 幽灵
+    0 面板 1 tile（88×88 @ 窗口原位）——「不是凭空出现」达标；
+  - **涨回**：双击 tile 反向形变，几何精确恢复（180,120,320×340）；
+  - **活图标**：tile 指针与现实时间一致；测试时间 10:10 时 tile 与窗口
+    形态指针同刻同角（同步走字）；分钟边界实测走字 ✓
+  - **拖拽驻留**：tile 拖 (+200,+130) 落点精确、涨回再缩起位置保持
+    （persistAcrossForms ✓）；
+  - **多实例**：两时钟两 tile、各有表盘、位置互异；
+  - **连点 5 次**：并发幽灵恒 ≤1、终态形态唯一；
+  - **回归**：滚轮/平移（dispatch_callable 修复生效，松手不打回）、
+    去重守卫（物理双击 +1 窗）、console 零 pageerror。
+  - **非 bug 观察**：ZUI 下最大化不改几何（D3：最大化 = camera fit，
+    Z1 未实现）；ghost 圆角恒 10px（窗口与 tile 圆角相同，无可形变）。
+  - 遗留：任务栏最小化按钮仍走经典 toggle_min（HUD 在 transform 外需
+    另做 screen→world 换算）。
 - **2026-09-15 B 方案定案（形态态机）**：用户决策——ZUI 版本**窗口即图标，
   同一对象两种形态**（§3.8/§3.9，D6–D8）。此前派出的 A 方案（两对象系统架
   FLIP 桥）代理任务被叫停作废，Morph 执行层设计吸收进 §3.9。新增 Z1.5
