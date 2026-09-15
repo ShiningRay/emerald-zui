@@ -211,22 +211,30 @@ module Emerald
         inst
       end
 
-      # 图标 → 窗口：消费备份几何恢复（无备份走级联兜底，PLAN §3.8「几何取
-      # backup 或级联」）→ flip form → wm.open 重登记窗口 → 幽灵从 tile 飞
-      # 往窗口矩形。双击 tile 与「图标形态单例再启动」两路进入
+      # 图标 → 窗口：位置**由图标锚位决定**（§3.8 修订②：窗口从图标的当前
+      # 位置长出——图标拖到哪，双击后窗口就在哪出现，形变是原地放大），尺寸
+      # 取窗口备份/默认（窗口大小语义与图标位置解耦）→ flip form → wm.open
+      # 重登记 → 幽灵原地放大。双击 tile 与「图标形态单例再启动」两路进入
       def morph_to_window(inst)
         return if morphing?(inst.win_id) || inst.form != :icon
 
         from = icon_form_rect(inst)
         restored = inst.morph_to(:window)
-        # 目标矩形带窗口圆角（panel 10px）：幽灵 border-radius 从 tile 圆角
-        # 形变回窗口圆角（morph.rb to_rect[:radius] 契约的可选键）
-        to = (restored || geometry_for(inst)).merge(radius: 10)
+        to = window_rect_for(inst, restored)
         @morphing[inst.win_id] = true
         fly_morph(inst, from: from, to: to,
                   from_class: "zui-iconform-#{sanitize_win_id(inst.win_id)}")
         @wm.open(inst.win_id, title: inst.class.app_title, geometry: to)
         inst
+      end
+
+      # 窗口形态的世界矩形（形变矩形对的 window 端）：位置 = 图标锚位，
+      # 尺寸 = 备份几何 / 默认级联；radius = panel 圆角（幽灵 border-radius
+      # 随之形变，morph.rb to_rect[:radius] 契约的可选键）
+      def window_rect_for(inst, restored)
+        anchor = inst.icon_geometry || FALLBACK_GEOMETRY
+        base = restored || geometry_for(inst)
+        { x: anchor[:x], y: anchor[:y], w: base[:w], h: base[:h], radius: 10 }
       end
 
       # 图标拖移的落点回写（纯逻辑段，单测直钉）：世界坐标直写驻留几何——
@@ -297,12 +305,13 @@ module Emerald
       def open_with_morph(inst)
         assign_anchor(inst)
         inst.form = :window
-        g = geometry_for(inst)
+        # 位置 = 图标锚位（启动方向同样"在图标处长出"）；尺寸取默认级联
+        g = window_rect_for(inst, nil)
         slot = launcher_rect_for(inst.class.app_id)
         self.morph_tick = morph_tick + 1
         if slot
           @morphing[inst.win_id] = true
-          fly_morph(inst, from: slot.merge(radius: 12), to: g.merge(radius: 10),
+          fly_morph(inst, from: slot.merge(radius: 10), to: g,
                     from_class: "d-icon-app-#{sanitize_win_id(inst.class.app_id)}")
         end
         @wm.open(inst.win_id, title: inst.class.app_title, geometry: g)

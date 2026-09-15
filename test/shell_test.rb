@@ -148,8 +148,8 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :icon, inst.form
     assert_empty @shell.wm.windows, 'wm 只登记窗口形态实例（实例留 registry）'
-    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, inst.window_geometry_backup,
-                 '缩起暂存窗口几何')
+    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, inst.window_geometry_backup,
+                 '缩起暂存窗口几何（窗口开在图标锚位 (120,90)——CRuby 兜底）')
     assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
                  '锚位在启动时定（§3.8 修订）：CRuby 无 DOM 取不到启动器槽位 → ' \
                  '退化为兜底几何级联序 0，与窗口位置无关')
@@ -169,8 +169,8 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :window, inst.form
     assert_includes @shell.wm.windows, :about
-    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, @shell.wm.geometry(:about),
-                 '几何取 backup 恢复，不走默认级联')
+    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, @shell.wm.geometry(:about),
+                 '位置 = 图标锚位（原地长出），尺寸取 backup——图标拖到哪窗口就出在哪')
     assert_nil inst.window_geometry_backup, 'backup 已消费'
     refute_includes render_html, 'zui-iconform-about', '图标 tile 消失'
   end
@@ -231,7 +231,20 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :window, inst.form, '图标形态单例再启动 = 涨回窗口（morph 恢复备份几何）'
     assert_includes @shell.wm.windows, :about
-    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, @shell.wm.geometry(:about))
+    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, @shell.wm.geometry(:about),
+                 '单例再启动：窗口回到图标锚位 + backup 尺寸')
+  end
+
+  # 用户复查缺陷回归：图标拖动换位后双击，窗口必须出现在**图标当前所在处**
+  # （曾用「上次窗口几何」定位——图标拖到哪都无效，窗口跑回旧位置）
+  def test_window_grows_at_dragged_icon_position
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+    @shell.place_icon_at({ inst: inst, x: 640.0, y: 420.0 })
+
+    @shell.morph_to_window(inst)
+    assert_equal({ x: 640, y: 420, w: 380, h: 280 }, @shell.wm.geometry(:about),
+                 '窗口 = 图标当前位置长出（位置随图标，尺寸随窗口备份）')
   end
 
   # ── Z1.5 修订（§3.8 表征互斥 + 槽位恒定，2026-09-16 用户复查）──────
