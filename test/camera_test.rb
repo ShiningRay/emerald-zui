@@ -6,7 +6,7 @@ require 'emerald/zui/camera'
 
 # Z0 · 相机数学全契约锁定（docs/PLAN.md §3.1）：
 # 锚点不动性 / 范围钳制 / fit 中心对齐 / center_on 保缩放居中 /
-# 世界屏幕往返恒等 / F6 守卫。
+# 世界屏幕往返恒等 / home 回默认态 / F6 守卫。
 # 只加载 camera 本体（不经 emerald/zui 入口），与 shell 等并行工序解耦。
 class CameraTest < Minitest::Test
   DELTA = 1e-9
@@ -85,7 +85,8 @@ class CameraTest < Minitest::Test
       zoom_at:   -> { cam.zoom_at(0, 0, 2) },
       pan_by:    -> { cam.pan_by(1, 1) },
       fit:       -> { cam.fit({ x: 0, y: 0, w: 10, h: 10 }, VP) },
-      center_on: -> { cam.center_on(0, 0, VP) }
+      center_on: -> { cam.center_on(0, 0, VP) },
+      home:      -> { cam.home }
     }.each do |op, callable|
       error = capture_error_in_effect(&callable)
       refute_nil error, "Camera##{op} 在 Effect 内应 raise"
@@ -299,6 +300,22 @@ class CameraTest < Minitest::Test
     center = cam.world_to_screen(100, 50)
     assert_in_delta 0.0, center[0], 1e-6
     assert_in_delta 300.0, center[1], 1e-6
+  end
+
+  # ── home：回家（小地图 ⌂，PLAN §8 防迷路）────────────
+
+  def test_home_returns_to_default_from_any_state
+    cam = Emerald::Zui::Camera.new
+    cam.home # 默认态回家是稳态 no-op
+    assert_equal Emerald::Zui::Camera::DEFAULT_STATE, cam.get
+
+    [{ x: 120, y: -45, zoom: 2.5 },
+     { x: -8000, y: 6000, zoom: 0.1 },
+     { x: 3, y: 4, zoom: 4.0 }].each do |st|
+      cam.set(st)
+      cam.home
+      assert_equal Emerald::Zui::Camera::DEFAULT_STATE, cam.get, "state=#{st}"
+    end
   end
 
   # ── 世界/屏幕换算 ────────────────────────────────────

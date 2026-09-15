@@ -11,9 +11,9 @@ module Emerald
     # 对应世界层容器的 CSS transform（origin 0 0，D2）：
     #   translate(x*zoom px, y*zoom px) scale(zoom)
     #
-    # 变更纪律（beryl F6 同款守卫）：set/zoom_at/pan_by/fit/center_on 只能在
-    # 事件回调（wheel/drag/快捷键/任务栏点击/小地图导航）里调用，view/Effect 内
-    # 直接 raise。
+    # 变更纪律（beryl F6 同款守卫）：set/zoom_at/pan_by/fit/center_on/home 只能在
+    # 事件回调（wheel/drag/快捷键/任务栏点击/小地图导航/回家钮）里调用，
+    # view/Effect 内直接 raise。
     class Camera
       MIN_ZOOM = 0.1
       MAX_ZOOM = 4.0
@@ -102,6 +102,13 @@ module Emerald
         set(x: vw / 2.0 / s[:zoom] - Float(wx),
             y: vh / 2.0 / s[:zoom] - Float(wy),
             zoom: s[:zoom])
+      end
+
+      # 回家：相机回默认状态 {0,0,1}（小地图 ⌂ 按钮；PLAN §8 防迷路——
+      # 世界再大飞得再远，一键回原点）
+      def home
+        assert_outside_effect!(:home)
+        set(DEFAULT_STATE)
       end
 
       # ── 坐标换算（纯读取，任何上下文可调）────────────────

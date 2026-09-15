@@ -4,9 +4,11 @@ require 'minitest/autorun'
 require 'emerald/zui'
 
 # Z1 · 小地图单测（docs/PLAN.md §8 防迷路三件套之一）：投影接线（窗块/取景框
-# 几何）、导航纯逻辑段（地图坐标/客户端坐标 → Camera#center_on）、active 高亮。
-# 纯 CRuby（beryl F5）：StringRenderer 渲染 + 直接方法断言；投影数学本身的
-# 断言归 projector_test（契约边界），点击/拖拽的 DOM 监听段由浏览器验收。
+# 几何）、导航纯逻辑段（地图坐标/客户端坐标 → Camera#center_on）、active 高亮、
+# 回家按钮（渲染 + 处理器回默认态）、拖拽冻结（显示层与换算走 @drag_projector
+# 快照、松手恢复动态拟合）、缩略图锚点盒。纯 CRuby（beryl F5）：StringRenderer
+# 渲染 + 直接方法断言；投影数学本身的断言归 projector_test（契约边界），
+# 点击/拖拽的 DOM 监听段与缩略图克隆同步由浏览器验收。
 class MinimapTest < Minitest::Test
   VP = { w: 1000, h: 600 }.freeze
 
@@ -125,7 +127,118 @@ class MinimapTest < Minitest::Test
                  minimap.send(:current_viewport)
   end
 
+  # ── 回家按钮（相机回 {0,0,1}）────────────────────────
+
+  def test_home_button_renders_as_canvas_sibling
+    html = render_html
+    assert_includes html, 'zui-minimap-home'
+    # 按钮是 canvas 的兄弟节点（面板直接子级）：点击不被画布 mousedown 监听抢走
+    assert_operator html.index('zui-minimap-home'), :>, html.index('zui-minimap-canvas')
+  end
+
+  def test_home_button_handler_returns_camera_to_default
+    render_html # 挂载节点树后才取得到按钮处理器
+    @camera.set(x: 120, y: -45, zoom: 2.5)
+
+    handler = find_node(@minimap.root, 'zui-minimap-home').props[:on_click]
+    refute_nil handler, '回家钮应挂 on_click 处理器'
+    handler.call(nil)
+
+    assert_equal Emerald::Zui::Camera::DEFAULT_STATE, @camera.get
+  end
+
+  # ── 内容缩略图锚点（CRuby 下空盒；克隆同步是 Opal 专属，浏览器验收）──
+
+  def test_thumbs_anchor_box_renders_empty_inside_canvas
+    @wm.open(:a, title: 'A', geometry: { x: 0, y: 0, w: 200, h: 100 })
+    html = render_html
+    assert_includes html, 'zui-minimap-thumbs', '缩略图锚点盒应渲染（CRuby 下空盒）'
+    # 无 block → citrine 不管理其子节点：盒必须是空的（外来 div 全由命令式填充）
+    assert_equal '', html[/<div class="zui-minimap-thumbs"[^>]*>(.*?)<\/div>/, 1]
+    assert_operator html.index('zui-minimap-thumbs'), :>, html.index('zui-minimap-canvas'),
+                    '锚点应在画布内（与投影同坐标系），取景框之下'
+  end
+
+  # ── 拖拽「呼吸」修复：冻结 Projector 快照 ─────────────
+
+  def test_drag_freeze_pins_display_layer_to_snapshot
+    @wm.open(:a, title: 'A', geometry: { x: 100, y: 50, w: 400, h: 300 })
+    blip_before = render_html[/class="zui-minimap-win[^"]*" style="([^"]*)"/, 1]
+    refute_nil blip_before
+
+    @minimap.send(:freeze_drag_projection)
+    frozen = @minimap.instance_variable_get(:@drag_projector)
+    refute_nil frozen
+    assert_same frozen, @minimap.send(:projector), '拖拽中显示层应读冻结快照'
+
+    # 模拟拖拽飞行：相机连续变化、view 反复重跑——色块与比例尺完全静止，
+    # 取景框按冻结快照的映射在静态地图上平移
+    [{ x: 200, y: 100, zoom: 1.0 }, { x: 400, y: -50, zoom: 2.0 }].each do |st|
+      @camera.set(st)
+      html = render_html
+      assert_equal blip_before, html[/class="zui-minimap-win[^"]*" style="([^"]*)"/, 1],
+                   "state=#{st} 拖拽中色块样式不应变化"
+
+      cam = html[/class="zui-minimap-cam" style="([^"]*)"/, 1]
+      mx, my = frozen.to_map(-st[:x], -st[:y])
+      s = frozen.scale
+      assert_in_delta mx, style_num(cam, :left), 1e-6, "state=#{st} 取景框位置 = 冻结快照的映射"
+      assert_in_delta my, style_num(cam, :top), 1e-6, "state=#{st} 取景框位置 = 冻结快照的映射"
+      assert_in_delta VP[:w] / st[:zoom] * s, style_num(cam, :width), 1e-6
+      assert_in_delta VP[:h] / st[:zoom] * s, style_num(cam, :height), 1e-6
+    end
+  end
+
+  def test_drag_freeze_pins_navigation_conversion_to_snapshot
+    @wm.open(:a, title: 'A', geometry: { x: 100, y: 50, w: 400, h: 300 })
+    @camera.set(x: 7, y: -3, zoom: 2.0)
+    @minimap.send(:freeze_drag_projection)
+    frozen = @minimap.instance_variable_get(:@drag_projector)
+
+    # 换算走冻结快照：地图点 → 世界点按冻结 bounds 逆映射，飞行中 bounds 不变 →
+    # 光标下的世界点不漂移（呼吸修复的核心手感断言）
+    wx, wy = frozen.to_world(90, 60)
+    @minimap.send(:fly_to_map_point, 90, 60)
+    screen = @camera.world_to_screen(wx, wy)
+    assert_in_delta VP[:w] / 2.0, screen[0], 1e-6, '世界点落在视口中心'
+    assert_in_delta VP[:h] / 2.0, screen[1], 1e-6
+
+    # 动态拟合下 bounds 已随飞行变化，同一地图点会换算出另一个世界点（反例：
+    # 不冻结必漂移）；冻结快照则恒定
+    assert_in_delta wx, frozen.to_world(90, 60)[0], 1e-9
+    assert_in_delta wy, frozen.to_world(90, 60)[1], 1e-9
+  end
+
+  def test_drag_thaw_restores_dynamic_refit
+    @wm.open(:a, title: 'A', geometry: { x: 100, y: 50, w: 400, h: 300 })
+    @minimap.send(:freeze_drag_projection)
+    frozen = @minimap.instance_variable_get(:@drag_projector)
+
+    @minimap.send(:thaw_drag_projection)
+    assert_nil @minimap.instance_variable_get(:@drag_projector)
+    refute_same frozen, @minimap.send(:projector), '松手后应恢复动态拟合（现算投影）'
+
+    # 松手后显示层走现算投影：相机变化 → bounds 变化 → 取景框按新比例尺映射
+    @camera.set(x: 500, y: 300, zoom: 2.0)
+    cam = render_html[/class="zui-minimap-cam" style="([^"]*)"/, 1]
+    fresh = @minimap.send(:fresh_projector)
+    mx, my = fresh.to_map(-500, -300)
+    assert_in_delta mx, style_num(cam, :left), 1e-6, '松手后取景框 = 现算投影的映射'
+    assert_in_delta my, style_num(cam, :top), 1e-6
+  end
+
   private
+
+  # 深度优先找 css_class 含给定串的节点（StringRenderer 挂载后的节点树）
+  def find_node(node, css_class)
+    return node if node.props[:css_class].to_s.include?(css_class)
+
+    node.children.each do |child|
+      found = find_node(child, css_class)
+      return found if found
+    end
+    nil
+  end
 
   # 从 StringRenderer 的内联样式串里取数值（"left:24.4px" → 24.4）
   def style_num(style, key)

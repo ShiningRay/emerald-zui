@@ -49,6 +49,23 @@ module Emerald
         end
       end
 
+      # 世界层窗口渲染循环：与 DesktopShell#each_window_frame 同一份接线
+      #（逐窗 frame + on_close，语义以父类为准），只追加每窗稳定挂钩类
+      # zui-win-<id>——小地图内容缩略图按它 querySelector 取真实面板克隆
+      #（minimap.rb sync_window_thumbs）。与应用自声明的 window_opts
+      # css_class 并存（如 stickynote 的 sticky-note-win）
+      def each_window_frame
+        wins = @wm.windows
+        @registry.each_running do |inst|
+          next unless wins.include?(inst.win_id)
+
+          @wm.frame(inst.win_id, **inst.class.window_opts, content: -> { inst.view },
+                    css_class: win_frame_class(inst),
+                    on_close: -> { close_window(inst.win_id) }).view
+        end
+        nil
+      end
+
       # HUD 层：屏幕固定、不随相机变换；各组件自身 fixed 定位，
       # .zui-hud 仅语义占位 + pointer-events 统筹（样式见 examples/zui_desktop.html）。
       # 小地图殿后：世界缩略 + 相机取景框，点击/拖拽 = 相机飞到该世界点
@@ -75,6 +92,15 @@ module Emerald
       end
 
       private
+
+      # 每窗挂钩类：zui-win-<sanitized id> 在前，应用自声明的 window_opts
+      # css_class 在后（window_opts 可能已带，如 stickynote 异形窗的
+      # sticky-note-win）。sanitize 规则与 minimap.rb 的 querySelector
+      # 必须一致（win_id 含 '#' 等 CSS 特殊字符时双方同步替换），改一处
+      # 另一处必须跟：shell_test 的挂钩断言 + minimap 缩略图同步依赖它
+      def win_frame_class(inst)
+        "zui-win-#{inst.win_id.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')} #{inst.class.window_opts[:css_class]}".strip
+      end
 
       # 屏幕视口真实尺寸（导航数学用：center_on / 小地图取景框）：ZUI 覆写
       # current_viewport 恒 nil 是为了关 wm 钳制/吸附（§3.3），而相机居中与

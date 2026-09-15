@@ -67,6 +67,12 @@ class ZuiShellTest < Minitest::Test
     assert_operator html.index('b-taskbtn'), :>, html.index('zui-hud'), '任务栏按钮仍在 HUD'
   end
 
+  def test_window_frames_carry_minimap_hook_class
+    @shell.launch_app(:about)
+    html = render_html
+    assert_includes html, 'zui-win-about', '每窗稳定挂钩类：小地图缩略图取真实面板用'
+  end
+
   # ── 相机接线 ─────────────────────────────────────────
 
   def test_camera_wired_with_default_state

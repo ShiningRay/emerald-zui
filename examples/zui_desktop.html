@@ -239,6 +239,23 @@
   .zui-minimap-win.is-active { background: var(--accent); opacity: 1; }
   .zui-minimap-cam { position: absolute; border: 1px solid var(--accent);
                      background: #4f8cff22; pointer-events: none; }
+  /* 内容缩略图层（minimap.rb 命令式填充）：citrine 只保留这个空锚点盒元素
+     （无 block + key 固定复用），盒内缩略图全是外来 div，组件重渲染不碰；
+     pointer-events 全断——点击穿透到画布走导航。DOM 序压在色块之上、
+     取景框之下 */
+  .zui-minimap-thumbs { position: absolute; inset: 0; pointer-events: none; }
+  .zui-minimap-thumb { position: absolute; overflow: hidden; pointer-events: none;
+                       border: 1px solid transparent; border-radius: 2px; }
+  .zui-minimap-thumb.is-active { border-color: var(--accent); }
+  .zui-minimap-thumb .panel { box-shadow: none; } /* 缩略尺寸下阴影只会糊成斑块 */
+  /* 回家钮（相机回 {0,0,1}，PLAN §8 防迷路）：圆形小钮悬于面板右上角，
+     canvas 的兄弟节点——点击不会触发小地图导航 */
+  .zui-minimap-home { position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
+                      border-radius: 50%; background: var(--panel2); border: 1px solid var(--line);
+                      color: var(--dim); font-size: 12px; cursor: pointer;
+                      display: flex; align-items: center; justify-content: center;
+                      user-select: none; }
+  .zui-minimap-home:hover { border-color: var(--accent); color: var(--accent); }
 </style>
 </head>
 <body>
