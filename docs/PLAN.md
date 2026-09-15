@@ -285,7 +285,7 @@ end
 | 用户晕动/不习惯 | Settings 开关默认 classic；ZUI 需主动开启 |
 | 形态切换误用 close 语义 | window→icon 走 `wm.close` + 实例留 registry，与 close（+registry.dispose）代码路径必须分开；单测锁定 dispose 不被形态切换调用 |
 | form 渲染分发漏守卫 | D4 守卫改写为按 form 分派后，关闭链路（✕/⌘W）回归测试锁定 |
-| 双击图标双触发（待查） | 已三次复现（每次双击恰好 +2 窗），Z1.5 前必须定位；若根因在 citrine 则 ZuiShell 侧去重守卫 + 反哺记录（citrine 树有他人改动，禁改） |
+| 双击图标双触发（**已定位，2026-09-15**） | 根因：beryl `setup_dblclick`（renderer.rb:183）与 citrine `EVENT_DEFS`（dom.rb:101）在**同一挂载路径各绑一次**，一次物理双击 = 2 次处理器（浏览器打点实证：launch_app×2，单例应用挡住第二发才只见于多实例）。正道 = beryl 删 `setup_dblclick`（PR #2 合并后单独提删 + 回归测试）；过渡 = ZuiShell `launch_app` 200ms 同窗去重守卫（已落地，带参启动豁免），citrine 侧修复后守卫退化为兜底 |
 
 ## 9. 实施记录
 
@@ -343,6 +343,26 @@ end
   位置对位会错配），信号 Effect（几何/z 序）+ 1200ms 定时保鲜双通道，
   克隆剥 id、pointer-events 全断。③ **回家按钮**（⌂ → `Camera#home`）。
   浏览器验收待复验项：拖拽静止感、缩略图克隆实际效果。
+- **2026-09-15 Z1.5 落地（B 方案态机，114 项全绿）**：四路并行——
+  ① **app_form.rb**：`morph_to(target, window_geometry:)` 纯状态段（backup
+  一次性消费、非法形态 raise、同形态 no-op、icon_slot 级联数学），实例侧
+  零副作用（wm/DOM 归 shell，D2 分层）。② **shell.rb**：form 分派渲染
+  （live tile 契约类 `zui-iconform-<id>`、单击选中/双击涨回/拖拽驻留两段式）；
+  window_frame **直连 WindowFrame** 复刻 wm.frame 只换 on_minimize（beryl
+  硬接 toggle_min，kwargs 覆盖不可靠——Opal 显式关键字映射才可测）；morph
+  执行管 backup/级联/wm.close+open（实例留 registry）；`launch_app` 200ms
+  去重守卫（带参豁免、图标形态单例再启动优先涨回）。③ **morph.rb**：
+  transform 纯数学 + fly 执行段（cloneNode 剥 id、transitionend + 定时器
+  双保险收场、`--morph-ms` 变量注入、to_rect 可选 radius 圆角形变、
+  `Morph.morphing?` 全局防重入）。④ **Clock dogfood**：分钟粒度 signal
+  （`Clock.snap`/`hand_angles` 纯函数：时针 30°/时+0.5°/分爬行），tick 链
+  挂 boot/deactivate——**关键发现：app 实例经 content 插槽渲染时
+  on_mount 不触发**（citrine 只在 render_component 跑 mount hooks，与小
+  地图 render(类) 修复同一框架性质）；窗口形态钟面 / 图标形态双指针共享
+  signal 原地重渲染。⑤ **双击双触发根因定位**（§8 更新）：beryl 与
+  citrine 双绑 dblclick，反哺 = PR #2 合并后删 beryl setup_dblclick。
+  **浏览器验收待办**：morph 幽灵动画观感、tile 拖拽手感、去重守卫对真实
+  双击事件流覆盖、Clock 双形态同步走字。
 - **2026-09-15 B 方案定案（形态态机）**：用户决策——ZUI 版本**窗口即图标，
   同一对象两种形态**（§3.8/§3.9，D6–D8）。此前派出的 A 方案（两对象系统架
   FLIP 桥）代理任务被叫停作废，Morph 执行层设计吸收进 §3.9。新增 Z1.5

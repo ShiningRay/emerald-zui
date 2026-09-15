@@ -7,6 +7,25 @@
 require 'minitest/autorun'
 require 'emerald/zui'
 
+# Clock 命名空间守卫（并行路线实现 clock.rb 后模块已存在；此处只为
+# 注册守卫的单测提供 stub 挂点，幂等）
+unless defined?(Emerald::Zui::Apps)
+  module Emerald::Zui::Apps; end
+end
+
+# Z1.5 多实例假人（单例语义已被 About 覆盖，去重/级联需要多实例应用）：
+# 注册进各测试的崭新 shell.registry，互不染
+ZuiMorphTestApp = Class.new(Emerald::App) do
+  app_id :morph_test
+  app_title '形态多开'
+  app_icon '▣'
+  default_geometry { { x: 100, y: 100, w: 200, h: 150 } }
+
+  def view
+    label { 'morph' }
+  end
+end
+
 class ZuiShellTest < Minitest::Test
   def setup
     @shell = Emerald::Zui::Shell.new
@@ -119,5 +138,160 @@ class ZuiShellTest < Minitest::Test
     c = @shell.camera.get
     assert_in_delta(12.0, c[:x], 1e-9, 'pan_by 抓取语义：x′ = x + dx/zoom（zoom=1）')
     assert_in_delta(8.0, c[:y], 1e-9)
+  end
+
+  # ── Z1.5 · 形态态机（PLAN §3.8：窗口即图标，同一实例两形态）──────
+
+  def test_morph_to_icon_replaces_window_with_live_tile
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+
+    assert_equal :icon, inst.form
+    assert_empty @shell.wm.windows, 'wm 只登记窗口形态实例（实例留 registry）'
+    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, inst.window_geometry_backup,
+                 '缩起暂存窗口几何')
+    assert_equal({ x: 200, y: 120 }, inst.icon_geometry,
+                 '首缩起驻留位 = 窗口位置（级联序 0，落图标几何位）')
+
+    html = render_html
+    assert_includes html, 'zui-iconform zui-iconform-about', 'tile 挂钩类（契约）'
+    assert_includes html, 'zui-iconform-glyph', '默认 icon_view：glyph（D7 兼容降级）'
+    assert_includes html, '◈', 'glyph 取 app_icon'
+    assert_includes html, 'left:200px;top:120px', 'tile 定位于驻留几何（世界坐标）'
+    refute_includes html, 'panel-head', '窗口本体不渲染（form 分派）'
+  end
+
+  def test_morph_to_window_restores_backup_geometry
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+    @shell.morph_to_window(inst)
+
+    assert_equal :window, inst.form
+    assert_includes @shell.wm.windows, :about
+    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, @shell.wm.geometry(:about),
+                 '几何取 backup 恢复，不走默认级联')
+    assert_nil inst.window_geometry_backup, 'backup 已消费'
+    refute_includes render_html, 'zui-iconform-about', '图标 tile 消失'
+  end
+
+  def test_window_minimize_button_wired_to_morph
+    inst = @shell.launch_app(:about)
+    @shell.send(:window_frame, inst).on_minimize.call
+
+    assert_equal :icon, inst.form, 'ZUI 语义：最小化 = 缩成图标（§3.8 最小化按钮触发）'
+    assert_empty @shell.wm.windows
+    assert_includes render_html, 'zui-iconform-about'
+  end
+
+  def test_classic_toggle_min_keeps_window_form
+    inst = @shell.launch_app(:about)
+    @shell.wm.toggle_min(:about)
+
+    assert_equal :window, inst.form, '任务栏最小化暂走经典 toggle_min（§3.9），形态不变'
+    assert_includes @shell.wm.windows, :about
+  end
+
+  def test_each_instance_morphs_independently_with_sanitized_classes
+    @shell.registry.register(ZuiMorphTestApp)
+    a = nil
+    b = nil
+    @shell.stub(:now_ms, 1000) { a = @shell.launch_app(:morph_test) }
+    @shell.stub(:now_ms, 5000) { b = @shell.launch_app(:morph_test) }
+    refute_same a, b, '去重窗外两次启动 = 两个独立实例'
+
+    @shell.morph_to_icon(a)
+    assert_equal :window, b.form, '多实例各自独立形态'
+    assert_includes @shell.wm.windows, :'morph_test#2', 'b 仍在窗口登记'
+
+    html = render_html
+    assert_includes html, 'zui-iconform zui-iconform-morph_test'
+
+    @shell.morph_to_icon(b)
+    assert_includes render_html, 'zui-iconform zui-iconform-morph_test_2',
+                    '多实例 id 的 # 消毒为 _（与 win_frame_class 同规则）'
+    assert_equal({ x: 148, y: 148 }, b.icon_geometry,
+                 '级联序 1：窗口位置 + 24 错开（a 已驻留占序 0 位）')
+  end
+
+  def test_icon_drag_reposition_writes_resident_geometry
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+    @shell.place_icon_at({ inst: inst, x: 400.0, y: 300.0 })
+
+    assert_equal({ x: 400.0, y: 300.0 }, inst.icon_geometry, '驻留几何落点回写（F6 安全区）')
+    assert_includes render_html, 'left:400.0px;top:300.0px', '驻留几何直写 tile 世界定位'
+  end
+
+  def test_relaunch_singleton_in_icon_form_restores_window
+    inst = nil
+    @shell.stub(:now_ms, 1000) { inst = @shell.launch_app(:about) }
+    @shell.morph_to_icon(inst)
+    @shell.stub(:now_ms, 5000) { @shell.launch_app(:about) }
+
+    assert_equal :window, inst.form, '图标形态单例再启动 = 涨回窗口（morph 恢复备份几何）'
+    assert_includes @shell.wm.windows, :about
+    assert_equal({ x: 200, y: 120, w: 380, h: 280 }, @shell.wm.geometry(:about))
+  end
+
+  def test_restore_right_after_minimize_not_eaten_by_dedup
+    inst = nil
+    @shell.stub(:now_ms, 1000) { inst = @shell.launch_app(:about) }
+    @shell.morph_to_icon(inst)
+    # 最小化后立刻再启动（仍在原启动的去重窗内）：恢复优先于去重
+    @shell.stub(:now_ms, 1100) { @shell.launch_app(:about) }
+
+    assert_equal :window, inst.form
+  end
+
+  # ── Z1.5 · 启动去重守卫（PLAN §8「双击图标双触发」）──────────
+
+  def test_launch_dedup_guard_merges_same_tick_relaunch
+    @shell.registry.register(ZuiMorphTestApp)
+    @shell.stub(:now_ms, 1000) do
+      @shell.launch_app(:morph_test)
+      @shell.launch_app(:morph_test)
+    end
+    assert_equal 1, @shell.wm.windows.size, '同 tick 重复启动合并为一次（双击双触发守卫）'
+
+    @shell.stub(:now_ms, 5000) { @shell.launch_app(:morph_test) }
+    assert_equal 2, @shell.wm.windows.size, '去重窗外再启动正常多开'
+  end
+
+  def test_launch_dedup_guard_skips_argv_launches
+    @shell.registry.register(ZuiMorphTestApp)
+    @shell.stub(:now_ms, 1000) do
+      @shell.launch_app(:morph_test, path: 'a')
+      @shell.launch_app(:morph_test, path: 'b')
+    end
+    assert_equal 2, @shell.wm.windows.size, '带参启动不走守卫（open_file 连开不同文件不误吞）'
+  end
+
+  # ── Z1.5 · Clock 注册（契约：Zui::Apps::Clock / :clock / '时钟'）──
+
+  def test_clock_registered_when_class_available
+    fake_clock = Class.new(Emerald::App) do
+      app_id :clock
+      app_title '时钟'
+      def view
+        label { 'clock' }
+      end
+    end
+    mod = Emerald::Zui::Apps
+    mod.stub(:const_defined?, true, [:Clock, false]) do
+      mod.stub(:const_get, fake_clock, [:Clock, false]) do
+        shell = Emerald::Zui::Shell.new
+        entry = shell.registry.apps.find { |a| a[:id] == :clock }
+        refute_nil entry, 'Clock 落地后注册表应有 :clock（桌面图标/菜单自动出现）'
+        assert_equal '时钟', entry[:title]
+      end
+    end
+  end
+
+  def test_shell_boots_when_clock_unavailable
+    mod = Emerald::Zui::Apps
+    mod.stub(:const_defined?, false, [:Clock, false]) do
+      shell = Emerald::Zui::Shell.new
+      refute_includes shell.registry.apps.map { |a| a[:id] }, :clock
+    end
   end
 end

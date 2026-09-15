@@ -256,6 +256,21 @@
                       display: flex; align-items: center; justify-content: center;
                       user-select: none; }
   .zui-minimap-home:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 形变幽灵（PLAN §3.9：窗口⇄图标形态切换的 FLIP 执行载体）────
+     fly() 深克隆真实面板、剥 id、absolute 定位于源形态世界矩形（几何内联），
+     只动画 transform（中心差 translate + 非均匀 scale = 「变形」观感）+
+     border-radius + 内容交叉淡化；两端同在世界 transform 容器内，相机无关
+     零换算。位置/尺寸/transition 由引擎内联（时长 = Morph::DURATION_MS），
+     此类只承载静态语义：世界层层级上浮（窗口 z 序从 100 起，幽灵须在其上）、
+     手势穿透、居中 origin、内容淡出（--morph-ms 引擎内联注入，缺省 320ms） */
+  .zui-morph-ghost { position: absolute; z-index: 1500; margin: 0; overflow: hidden;
+                     pointer-events: none; transform-origin: 50% 50%;
+                     will-change: transform, border-radius; }
+  /* 内容交叉淡化（§3.9）：非均匀 scale 下正文会糊成斑块（PLAN §8 已接受
+     动画期模糊），淡出把观感收束到轮廓变形；到端由真实目标形态渲染接管 */
+  .zui-morph-ghost > * { animation: zui-morph-fade var(--morph-ms, 320ms) ease forwards; }
+  @keyframes zui-morph-fade { to { opacity: .12; } }
 </style>
 </head>
 <body>
