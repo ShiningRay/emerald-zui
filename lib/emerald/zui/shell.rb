@@ -5,6 +5,7 @@
 # 经此静态引入后浏览器/CRuby 双端可用；入口 zui.rb 锁定期间 require 落
 # 此处（与注册同路由，避免「类未加载致守卫跳过、dogfood 静默缺席」）
 require_relative 'apps/clock'
+require_relative 'apps/spotlight'
 
 module Emerald
   module Zui
@@ -29,6 +30,16 @@ module Emerald
       # 在该窗内合并为一次——机器级重复（双击双派发/监听器重复挂载，同 tick
       # 连发）被吞；人类有意再双击必在窗外
       LAUNCH_DEDUP_MS = 200
+      # 图标列槽位几何（锚位分配用；与 examples/zui_desktop.html 的
+      # .icon-grid 布局参数一致：左 16 / 上 40 / 单元 80×69 / 间距 14）
+      ICON_COLUMN_X = 16
+      ICON_COLUMN_TOP = 40
+      ICON_SLOT_W = 80
+      ICON_SLOT_H = 69
+      ICON_SLOT_GAP_X = 94  # 80 + 14
+      ICON_SLOT_GAP_Y = 83  # 69 + 14
+      SLOTS_PER_COLUMN = 8
+
       # 相机飞行时长（CSS transition，examples/zui_desktop.html 的 .is-flying）
       FLIGHT_MS = 280
       # 聚焦单窗 / 全景的内边距（世界像素）
@@ -59,6 +70,11 @@ module Emerald
         # 启动去重窗的最近启动记录：app_id(Symbol) => [now_ms, win_id]
         @launch_seen = {}
         super
+        # ZUI 专有操作的服务面（D10 ctx 唯一能力面）：启动器应用等经 ctx[:zui]
+        # 启动/退出/聚焦/涨回/收起实例，不必知道 shell 的存在。
+        # 必须在 super 之后注入——services 是父类建的那个 Hash 对象（registry
+        # 持有同一引用），后加键对已建服务可见，不必重建注册表
+        @services[:zui] = build_zui_services
       end
 
       # ── 视图组装（PLAN §3.2）：stage（屏幕固定）→ 世界（相机容器）→ HUD
@@ -85,50 +101,26 @@ module Emerald
         end
       end
 
-      # ── 表征互斥的图标网格（PLAN §3.8 修订 2026-09-16）───────
+      # ── 桌面图标网格（§3.8 修订 2026-09-16③：应用启动器退场）────────
       #
-      # 同一对象任意时刻只有一个表征在场上：应用有实例时其启动器图标让位
-      # （槽位交给实例的图标形态；窗口形态时槽位是空的——图标"变成"窗口
-      # 飞走了）。修正前启动器与实例 tile 并存 = 一个应用两个图标（用户
-      # 复查指出的缺陷）
+      # 未运行的应用**不再占桌面**——启动入口统一为启动器应用（Spotlight，
+      # ⌘K 呼出：搜索 → 启动 / 聚焦 / 退出）。桌面剩下的图标只表示两件事：
+      # ① VFS /Desktop 里的文件；② **运行中实例的收起形态**（见
+      # each_icon_form_tile）。因此图标语义不再有歧义：桌面上出现的应用图标
+      # = 它正开着（收起态）。
       def icon_grid
-        morph_tick # 读即订阅：实例增删（launch/quit）后启动器让位/回归
+        morph_tick # 读即订阅：实例增删后重跑（槽位占用变化）
         box(css_class: 'icon-grid') do
-          @registry.apps.each do |app|
-            app_icon(app) unless app_has_instances?(app[:id])
-          end
           desktop_entries.each { |node| file_icon(node) }
+          nil # 块末显式 nil：each 的返回值是数组，会被渲染层 tos 成 "[]"（R5 同款坑）
         end
       end
 
-      # 该应用是否有存活实例（任意形态）——启动器让位判定
-      def app_has_instances?(app_id)
-        @registry.each_running.any? { |inst| inst.class.app_id == app_id.to_sym }
-      end
-
-      # 每应用启动器挂钩类：d-icon-app-<app_id> 供启动形变测量槽位（§3.9 形变
-      # 源元素）与测试查询；sanitize 与 win_frame_class 同规则
-      def launcher_class(key)
-        base = icon_tile_class(key) # 父类：含选中态后缀
-        return base unless key.start_with?('app:')
-
-        base.sub('d-icon', "d-icon d-icon-app-#{sanitize_win_id(key.delete_prefix('app:'))}")
-      end
-
-      def app_icon(app)
-        key = "app:#{app[:id]}"
-        icon_tile(key, glyph: app[:icon].to_s, name: app[:title].to_s,
-                  on_open: -> { launch_app(app[:id]) })
-      end
-
-      # 与父类同构的图标块，唯 css_class 走 launcher_class（挂钩类）
-      def icon_tile(key, glyph:, name:, on_open:)
-        box(css_class: launcher_class(key),
-            on_click: ->(_e) { self.selected_icons = [key] },
-            on_dblclick: on_open) do
-          box(css_class: 'd-icon-glyph') { glyph }
-          label(css_class: 'd-icon-name') { name }
-        end
+      # 文件图标计位：图标列里文件先占槽，实例锚位顺排在其后（避免叠位）
+      def desktop_icon_count
+        @vfs.list(DESKTOP_DIR).size
+      rescue Emerald::VFS::NotFound
+        0
       end
 
       # 窗口渲染循环（PLAN §3.8 form 分派）：:window 形态走窗口框原路径
@@ -259,11 +251,17 @@ module Emerald
       # （重复 id / 未声明 app_id）不阻塞外壳启动
       def register_builtin_apps
         super
-        return unless defined?(Emerald::Zui::Apps) &&
-                      Emerald::Zui::Apps.const_defined?(:Clock, false)
+        %i[Clock Spotlight].each do |name|
+          next unless defined?(Emerald::Zui::Apps) &&
+                      Emerald::Zui::Apps.const_defined?(name, false)
 
-        # 显式 const_get（与守卫同口径）：注册的是「查到的类」，单测可钉
-        @registry.register(Emerald::Zui::Apps.const_get(:Clock, false))
+          # 显式 const_get（与守卫同口径）：注册的是「查到的类」，单测可钉
+          begin
+            @registry.register(Emerald::Zui::Apps.const_get(name, false))
+          rescue ArgumentError
+            next
+          end
+        end
       rescue ArgumentError
         nil
       end
@@ -308,61 +306,42 @@ module Emerald
       # 带形变的开窗：锚位 → form :window → bump morph_tick（启动器让位 +
       # 形变期两端都不渲染，只有幽灵）→ 幽灵从图标矩形飞涨到窗口矩形 →
       # wm.open（渲染仍被 @morphing 压着）→ 收尾 finish_morph 出窗
+      # 开窗（启动路径）：锚位 → form :window → 直接在锚位出窗。
+      # 无「从图标长出」形变——桌面已无启动器图标可作源（§3.8 修订③）；
+      # 窗口 ⇄ 图标的形变（收起/涨回）是形态态机的核心，照旧保留
       def open_with_morph(inst)
         assign_anchor(inst)
         inst.form = :window
-        # 位置 = 图标锚位（启动方向同样"在图标处长出"）；尺寸取默认级联
         g = window_rect_for(inst, nil)
-        slot = launcher_rect_for(inst.class.app_id)
         self.morph_tick = morph_tick + 1
-        if slot
-          @morphing[inst.win_id] = true
-          fly_morph(inst, from: slot.merge(radius: 10), to: g,
-                    from_class: "d-icon-app-#{sanitize_win_id(inst.class.app_id)}")
-        end
         @wm.open(inst.win_id, title: inst.class.app_title, geometry: g)
         inst
       end
 
-      # 锚位（§3.8 槽位恒定不变量：图标在哪，窗口就从哪长出、缩回哪去）：
-      # 首个实例取**启动器槽位**（DOM 实测世界矩形）；同应用已有实例或槽位
-      # 不可测 → 级联兜底。锚位一经确定即永驻（可拖拽换位）
+      # 锚位（§3.8 槽位恒定不变量）：桌面无启动器后，锚位取**图标列的空槽**
+      # ——按「文件图标占位数 + 已有收起实例数」顺排（列优先，与 .icon-grid
+      # 流向一致），分配后永驻（可拖拽换位）。窗与图标的位置关系不变：窗口
+      # 在这颗图标处长出、也缩回这里
       def assign_anchor(inst)
         return if inst.icon_geometry
 
-        slot = launcher_rect_for(inst.class.app_id)
-        seq = @registry.each_running.count do |other|
-          !other.equal?(inst) && other.class.app_id == inst.class.app_id
-        end
-        if slot && seq.zero?
-          # 记全矩形（含实测宽高）：tile 尺寸与形变落点都用它——缩回后与
-          # 桌面图标严丝合缝，不留「88×88 深色卡片」那种跳变
-          inst.icon_geometry = { x: slot[:x], y: slot[:y], w: slot[:w], h: slot[:h] }
-        else
-          inst.icon_geometry = AppForm.icon_slot(slot || FALLBACK_GEOMETRY, seq)
-        end
+        # 已分配锚位的实例都占槽（窗口形态也占——它在启动时就定了槽，收起后
+        # 落回原处；只数 :icon 形态会让第二个实例也拿槽 0，同位叠死）
+        seq = desktop_icon_count +
+              @registry.each_running.count { |o| !o.equal?(inst) && o.icon_geometry }
+        inst.icon_geometry = icon_slot_geometry(seq)
       end
 
-      # 启动器槽位的世界矩形（DOM 实测：图标与世界容器 rect 之差 ÷ zoom——
-      # 两个 rect 都在屏幕空间，相减即世界位移的屏幕投影，天然免疫相机
-      # transform）。CRuby 无 DOM → nil（形变与槽位退化为级联兜底）。
-      # ⚠️ 选择器一律走 Ruby 字符串 → Native 方法传参：**不要**把 `#{...}`
-      # 写进 backtick JS 的字符串字面量里（Opal 下插值不求值，实参变字面
-      # "sel"，querySelector 落空——本方法浏览器实证踩坑）
-      def launcher_rect_for(app_id)
-        return nil unless defined?(Opal)
-
-        sel = ".icon-grid .d-icon-app-#{sanitize_win_id(app_id)}"
-        doc = Native(`document`)
-        el = doc.querySelector(sel)
-        world = @world_node.dom
-        return nil if el.nil? || world.nil?
-
-        a = el.getBoundingClientRect
-        b = world.getBoundingClientRect
-        z = camera.get[:zoom]
-        { x: (a[:left] - b[:left]) / z, y: (a[:top] - b[:top]) / z,
-          w: a[:width] / z, h: a[:height] / z }
+      # 图标列第 seq 个槽位（列优先，SLOTS_PER_COLUMN 个一列）。
+      # ⚠️ 必须用 Integer#div 而非 `/`：**Opal 下 `1 / 8` 走 JS 除法得 0.125**
+      # （CRuby 是整除 0），槽位会落到 27.75px 这种鬼位置（浏览器实证踩坑：
+      # x = 16 + 0.125×94）。CRuby 单测发现不了这类差异——索引/槽位/分页
+      # 一律 `.div`。seq 先 to_i：计数可能来自 Float 形态的数值
+      def icon_slot_geometry(seq)
+        n = seq.to_i
+        { x: ICON_COLUMN_X + n.div(SLOTS_PER_COLUMN) * ICON_SLOT_GAP_X,
+          y: ICON_COLUMN_TOP + (n % SLOTS_PER_COLUMN) * ICON_SLOT_GAP_Y,
+          w: ICON_SLOT_W, h: ICON_SLOT_H }
       end
 
       # 命中已有实例时的复用：图标形态 → 涨回窗口；窗口形态 → 聚焦
@@ -416,6 +395,8 @@ module Emerald
         super
         Emerald.hotkey.register('meta+q') { quit_active_app }
         Emerald.hotkey.register('meta+0') { overview }
+        # 启动器（Spotlight 式）：⌘Space 被 macOS 占用，用 ⌘K（命令面板惯例）
+        Emerald.hotkey.register('meta+k') { launch_app(:spotlight) }
       end
 
       # 纯修饰键 keydown 不进 chord 解析：浏览器把单独按下的 ⌘/Shift/Alt 也
@@ -506,6 +487,22 @@ module Emerald
         g = @wm.geometry(win_id)
         fly_camera_to(g, padding: FOCUS_PADDING) if g
         nil
+      end
+
+      # 启动器应用（Spotlight）要用的 ZUI 操作（lambda 表，ctx[:zui]）
+      def build_zui_services
+        {
+          # 启动必须走 shell 的 launch_app（R2：registry.launch 只建实例，
+          # 开窗/锚位/形变归 shell）——应用拿到的服务面里这是唯一启动入口
+          launch: ->(app_id) { launch_app(app_id) },
+          quit: ->(win_id) { quit_app(win_id) },
+          focus: ->(win_id) { focus_window_with_flight(win_id) },
+          restore: lambda { |win_id|
+            inst = @registry.instance(win_id)
+            morph_to_window(inst) if inst && inst.form == :icon
+          },
+          collapse: ->(win_id) { collapse_window(win_id) },
+        }
       end
 
       # 任务栏桥接（hud_layer 的 Beryl::Taskbar 消费）

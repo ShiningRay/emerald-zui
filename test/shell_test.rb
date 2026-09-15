@@ -148,17 +148,16 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :icon, inst.form
     assert_empty @shell.wm.windows, 'wm 只登记窗口形态实例（实例留 registry）'
-    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, inst.window_geometry_backup,
-                 '缩起暂存窗口几何（窗口开在图标锚位 (120,90)——CRuby 兜底）')
-    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
-                 '锚位在启动时定（§3.8 修订）：CRuby 无 DOM 取不到启动器槽位 → ' \
-                 '退化为兜底几何级联序 0，与窗口位置无关')
+    assert_equal({ x: 16, y: 40, w: 380, h: 280 }, inst.window_geometry_backup,
+                 '缩起暂存窗口几何（窗口开在锚位槽 (16,40)）')
+    assert_equal({ x: 16, y: 40, w: 80, h: 69 }, inst.icon_geometry,
+                 '锚位在启动时定（§3.8 修订③）：桌面无启动器后取图标列空槽 0')
 
     html = render_html
     assert_includes html, 'zui-iconform d-icon zui-iconform-about', 'tile 挂钩类（契约）'
     assert_includes html, 'd-icon-glyph', '默认 icon_view：glyph（D7 兼容降级）'
     assert_includes html, '◈', 'glyph 取 app_icon'
-    assert_includes html, 'left:120px;top:90px', 'tile 定位于驻留几何（世界坐标）'
+    assert_includes html, 'left:16px;top:40px', 'tile 定位于锚位槽（世界坐标）'
     refute_includes html, 'panel-head', '窗口本体不渲染（form 分派）'
   end
 
@@ -169,7 +168,7 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :window, inst.form
     assert_includes @shell.wm.windows, :about
-    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, @shell.wm.geometry(:about),
+    assert_equal({ x: 16, y: 40, w: 380, h: 280 }, @shell.wm.geometry(:about),
                  '位置 = 图标锚位（原地长出），尺寸取 backup——图标拖到哪窗口就出在哪')
     assert_nil inst.window_geometry_backup, 'backup 已消费'
     refute_includes render_html, 'zui-iconform-about', '图标 tile 消失'
@@ -210,8 +209,8 @@ class ZuiShellTest < Minitest::Test
     @shell.morph_to_icon(b)
     assert_includes render_html, 'zui-iconform d-icon zui-iconform-morph_test_2',
                     '多实例 id 的 # 消毒为 _（与 win_frame_class 同规则）'
-    assert_equal({ x: 144, y: 114 }, b.icon_geometry,
-                 '级联序 1（§3.8 修订：锚位在启动时定，CRuby 兜底几何 + 24 错开）')
+    assert_equal({ x: 16, y: 123, w: 80, h: 69 }, b.icon_geometry,
+                 '锚位槽 1（列优先顺排：40 + 83）')
   end
 
   def test_icon_drag_reposition_writes_resident_geometry
@@ -231,7 +230,7 @@ class ZuiShellTest < Minitest::Test
 
     assert_equal :window, inst.form, '图标形态单例再启动 = 涨回窗口（morph 恢复备份几何）'
     assert_includes @shell.wm.windows, :about
-    assert_equal({ x: 120, y: 90, w: 380, h: 280 }, @shell.wm.geometry(:about),
+    assert_equal({ x: 16, y: 40, w: 380, h: 280 }, @shell.wm.geometry(:about),
                  '单例再启动：窗口回到图标锚位 + backup 尺寸')
   end
 
@@ -245,6 +244,29 @@ class ZuiShellTest < Minitest::Test
     @shell.morph_to_window(inst)
     assert_equal({ x: 640, y: 420, w: 380, h: 280 }, @shell.wm.geometry(:about),
                  '窗口 = 图标当前位置长出（位置随图标，尺寸随窗口备份）')
+  end
+
+  # ── 应用服务面（ctx[:zui]，D10）：启动器应用的操作入口 ─────────────
+
+  def test_zui_service_surface_exposed
+    zui = @shell.services[:zui]
+    assert_equal %i[collapse focus launch quit restore], zui.keys.sort,
+                 '服务面键集（应用只认这一张表）'
+
+    inst = @shell.launch_app(:about)
+    zui[:collapse].call(:about)
+    assert_equal :icon, inst.form, 'collapse → 收起为图标'
+    zui[:restore].call(:about)
+    assert_equal :window, inst.form, 'restore → 涨回窗口'
+    zui[:focus].call(:about)
+    assert @shell.wm.active?(:about), 'focus → 聚焦（+ 相机飞行）'
+    zui[:quit].call(:about)
+    assert_nil @shell.registry.instance(:about), 'quit → 真退出'
+  end
+
+  def test_zui_service_launch_opens_window
+    @shell.services[:zui][:launch].call(:about)
+    assert_includes @shell.wm.windows, :about, 'launch 经 shell 开窗（R2：registry 只建实例）'
   end
 
   # ── Z1 导航（§3.4：相机飞行 / ⌘0 全景 / 最大化=fit）──────────────
@@ -308,21 +330,43 @@ class ZuiShellTest < Minitest::Test
 
   # ── Z1.5 修订（§3.8 表征互斥 + 槽位恒定，2026-09-16 用户复查）──────
 
-  def test_launcher_yields_slot_while_instance_exists
+  # 启动器退场（§3.8 修订③）：桌面只留文件图标；应用启动入口 = 启动器应用
+  # 槽位数学必须整数化：Float 计数会退化成浮点除法，槽位落到 27.75px 这种
+  # 鬼位置（浏览器实证踩坑）
+  def test_icon_slot_geometry_integerized
+    assert_equal({ x: 16, y: 40, w: 80, h: 69 }, @shell.send(:icon_slot_geometry, 0))
+    assert_equal({ x: 16, y: 123, w: 80, h: 69 }, @shell.send(:icon_slot_geometry, 1.0),
+                 'Float 计数（1.0）也必须按整数行号排版')
+    assert_equal({ x: 110, y: 40, w: 80, h: 69 }, @shell.send(:icon_slot_geometry, 8.0))
+  end
+
+  def test_desktop_has_no_app_launchers
     html = render_html
-    assert_includes html, 'd-icon d-icon-app-about', '无实例：启动器在位（带槽位挂钩类）'
+    refute_includes html, 'd-icon-app-about', '未运行应用不占桌面（改由启动器应用承担）'
+    refute_includes html, 'd-icon-app-clock'
 
     inst = @shell.launch_app(:about)
-    refute_includes render_html, 'd-icon-app-about',
-                    '表征互斥：有实例（窗口形态）时启动器让位——一个应用不出现两个图标'
+    refute_includes render_html, 'd-icon-app-about', '运行中（窗口形态）也不回到桌面图标'
 
     @shell.morph_to_icon(inst)
-    html = render_html
-    refute_includes html, 'd-icon-app-about', '收起态：槽位由实例的图标形态接管'
-    assert_includes html, 'zui-iconform d-icon zui-iconform-about'
-
+    assert_includes render_html, 'zui-iconform-about',
+                    '收起形态才在桌面出现——桌面应用图标 = 该应用正开着'
     @shell.quit_app(:about)
-    assert_includes render_html, 'd-icon-app-about', '退出后启动器回归'
+    refute_includes render_html, 'zui-iconform-about', '退出后桌面无残留'
+  end
+
+  def test_anchor_slots_are_column_first
+    a = @shell.launch_app(:about)
+    @shell.stub(:now_ms, 5000) { @shell.launch_app(:files) }
+    assert_equal({ x: 16, y: 40, w: 80, h: 69 }, a.icon_geometry, '槽 0')
+    b = @shell.registry.each_running.to_a.last
+    assert_equal({ x: 16, y: 123, w: 80, h: 69 }, b.icon_geometry, '槽 1（列优先：40 + 83）')
+
+    # about=槽0、files=槽1，再开 7 个时钟补到槽 8（第 9 个槽）→ 换列
+    7.times { |i| @shell.stub(:now_ms, 10_000 + i * 1000) { @shell.launch_app(:clock) } }
+    ninth = @shell.registry.each_running.to_a.last
+    assert_equal({ x: 110, y: 40, w: 80, h: 69 }, ninth.icon_geometry,
+                 '槽 8 起换列（x = 16 + 94，行号归 0）')
   end
 
   def test_close_collapses_to_icon_instead_of_disposing
@@ -364,12 +408,12 @@ class ZuiShellTest < Minitest::Test
 
   def test_anchor_assigned_at_launch_not_at_minimize
     inst = @shell.launch_app(:about)
-    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
-                 '锚位在启动时定（槽位恒定不变量）：CRuby 取不到启动器槽位 → 兜底级联')
+    assert_equal({ x: 16, y: 40, w: 80, h: 69 }, inst.icon_geometry,
+                 '锚位在启动时定（槽位恒定不变量）：图标列空槽 0')
 
     @shell.wm.place(:about, { x: 700, y: 500, w: 380, h: 280 })
     @shell.morph_to_icon(inst)
-    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
+    assert_equal({ x: 16, y: 40, w: 80, h: 69 }, inst.icon_geometry,
                  '窗口后来移动不影响锚位——缩回的是图标原本所在处')
   end
 
