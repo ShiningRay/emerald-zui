@@ -159,21 +159,26 @@ class CameraTest < Minitest::Test
   def test_pan_by_formula
     cam = Emerald::Zui::Camera.new
     cam.pan_by(10, 20)
-    assert_equal({ x: -10.0, y: -20.0, zoom: 1.0 }, cam.get)
+    assert_equal({ x: 10.0, y: 20.0, zoom: 1.0 }, cam.get)
 
     cam = Emerald::Zui::Camera.new(zoom: 2)
     cam.pan_by(10, 20)
-    assert_equal({ x: -5.0, y: -10.0, zoom: 2.0 }, cam.get)
+    assert_equal({ x: 5.0, y: 10.0, zoom: 2.0 }, cam.get)
   end
 
   def test_pan_content_follows_cursor
     cam = Emerald::Zui::Camera.new(x: 5, y: 7, zoom: 2.5)
     before = cam.screen_to_world(320, 240)
 
+    # 抓取语义：按住 (320,240) 下的世界点拖到 (320+30, 240−20)，
+    # 该点应跟随光标——缩放前后「光标位置 ↔ 世界点」对应关系不变
     cam.pan_by(30, -20) # 光标向右 30、向上 20：内容同向移动
-    after = cam.screen_to_world(320 - 30, 240 + 20)
+    after = cam.screen_to_world(320 + 30, 240 - 20)
     assert_in_delta before[0], after[0], DELTA
     assert_in_delta before[1], after[1], DELTA
+
+    # 反例锁定：原位置现在指向的是别的世界点（内容确实移动了）
+    assert_operator (cam.screen_to_world(320, 240)[0] - before[0]).abs, :>, 1.0
   end
 
   # ── fit ──────────────────────────────────────────────

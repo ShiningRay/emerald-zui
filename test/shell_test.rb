@@ -92,7 +92,7 @@ class ZuiShellTest < Minitest::Test
   def test_commit_pan_writes_back_camera
     @shell.send(:commit_pan, { dx: 12.0, dy: 8.0 })
     c = @shell.camera.get
-    assert_in_delta(-12.0, c[:x], 1e-9, 'pan_by：x′ = x − dx/zoom（zoom=1）')
-    assert_in_delta(-8.0, c[:y], 1e-9)
+    assert_in_delta(12.0, c[:x], 1e-9, 'pan_by 抓取语义：x′ = x + dx/zoom（zoom=1）')
+    assert_in_delta(8.0, c[:y], 1e-9)
   end
 end

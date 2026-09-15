@@ -239,3 +239,20 @@ end
   依赖提前解除。
   **Z0 待人工验收**：浏览器手感（缩到全景再放大回窗口是否比 ⌘` 快）、
   滚轮在可滚动内容上误缩放、offsetLeft 前提验证。
+- **2026-09-15 Z0 浏览器验收与两处修复**（合成事件实证调试）：
+  ① **平移方向反转**——`pan_by` 公式用了「相机跟随光标」的减号约定，
+  改为抓取语义 `x' = x + dx/zoom`（内容跟随光标；camera.rb / shell.rb
+  手势跟随 / camera_test「内容跟随光标」断言补反例一并修正）。
+  ② **滚轮缩放浏览器端必炸**（平移提交同款暗伤）——根因是 Opal 对带
+  kwargs 的方法无条件 extract_kwargs：`Citrine.dispatch_callable` 的
+  `bind:` 关键字参数把末位位置参数 Hash（事件 payload）抽走，arg 变 nil
+  → `nil[:x]` NoMethodError。**CRuby 单测不可见**（花括号 Hash 在 CRuby
+  永远绑位置参数）。影响面含 beryl 窗口拖/放 live 回写；修复 =
+  bind 改位置参数，citrine 分支 `fix/dispatch-callable-kwargs`
+  （[PR #30](https://github.com/ShiningRay/citrine/pull/30)，315 项全绿，
+  附 payload 契约文档测试）。浏览器回归全过：滚轮四档缩放精确 e^0.12
+  递增、锚点漂移 0.00px、松手不打回、beryl 拖窗跟手精确 (120,60)。
+  **方法论记录**：Opal/CRuby 语义陷阱类 bug 只能靠浏览器 E2E 或
+  编译产物审查发现，单测门禁天然盲区。
+  **待办**：beryl PR #2（drag_scale）与 citrine PR #30 合并后接 Z1；
+  滚轮在可滚动窗口内容上的误缩放仍未做 scrollable 感知（浏览器验收定夺）。

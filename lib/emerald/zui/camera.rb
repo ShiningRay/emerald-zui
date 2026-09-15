@@ -54,11 +54,13 @@ module Emerald
             zoom: z)
       end
 
-      # 屏幕像素位移换算进世界：x' = x - dx/zoom（内容跟随光标）。
+      # 屏幕像素位移换算进世界（抓取语义，内容跟随光标）：
+      # 光标向右拖 dx → 内容右移 dx → x' = x + dx/zoom。
+      # 恒等式 screen = (world + {x,y})*zoom：x 增大，同一世界点在屏幕上右移。
       def pan_by(dx, dy)
         assert_outside_effect!(:pan_by)
         s = @signal.peek
-        set(x: s[:x] - dx / s[:zoom], y: s[:y] - dy / s[:zoom], zoom: s[:zoom])
+        set(x: s[:x] + dx / s[:zoom], y: s[:y] + dy / s[:zoom], zoom: s[:zoom])
       end
 
       # 飞到世界矩形（任务栏点击 / 最大化 / ⌘0 全景）：

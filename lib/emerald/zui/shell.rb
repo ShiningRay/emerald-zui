@@ -139,11 +139,11 @@ module Emerald
           e2 = Native(raw2)
           ldx = e2[:clientX] - sx
           ldy = e2[:clientY] - sy
-          # 手势跟随：按屏幕位移 ÷ zoom 换算世界位移（与 pan_by 同式），
+          # 手势跟随：抓取语义——内容随光标同向移动（与 pan_by 同式加号），
           # 直写 style 不进 signal——松手才落点回写
           el[:style][:transform] = camera_transform(
-            x: base[:x] - ldx / base[:zoom],
-            y: base[:y] - ldy / base[:zoom],
+            x: base[:x] + ldx / base[:zoom],
+            y: base[:y] + ldy / base[:zoom],
             zoom: base[:zoom]
           )
         }
