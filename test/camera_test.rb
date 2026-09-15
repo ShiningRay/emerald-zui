@@ -5,7 +5,8 @@ require 'citrine'
 require 'emerald/zui/camera'
 
 # Z0 · 相机数学全契约锁定（docs/PLAN.md §3.1）：
-# 锚点不动性 / 范围钳制 / fit 中心对齐 / 世界屏幕往返恒等 / F6 守卫。
+# 锚点不动性 / 范围钳制 / fit 中心对齐 / center_on 保缩放居中 /
+# 世界屏幕往返恒等 / F6 守卫。
 # 只加载 camera 本体（不经 emerald/zui 入口），与 shell 等并行工序解耦。
 class CameraTest < Minitest::Test
   DELTA = 1e-9
@@ -80,10 +81,11 @@ class CameraTest < Minitest::Test
   def test_mutations_raise_inside_effect
     cam = Emerald::Zui::Camera.new
     {
-      set:      -> { cam.set(x: 0, y: 0, zoom: 1) },
-      zoom_at:  -> { cam.zoom_at(0, 0, 2) },
-      pan_by:   -> { cam.pan_by(1, 1) },
-      fit:      -> { cam.fit({ x: 0, y: 0, w: 10, h: 10 }, VP) }
+      set:       -> { cam.set(x: 0, y: 0, zoom: 1) },
+      zoom_at:   -> { cam.zoom_at(0, 0, 2) },
+      pan_by:    -> { cam.pan_by(1, 1) },
+      fit:       -> { cam.fit({ x: 0, y: 0, w: 10, h: 10 }, VP) },
+      center_on: -> { cam.center_on(0, 0, VP) }
     }.each do |op, callable|
       error = capture_error_in_effect(&callable)
       refute_nil error, "Camera##{op} 在 Effect 内应 raise"
@@ -246,6 +248,57 @@ class CameraTest < Minitest::Test
     cam = Emerald::Zui::Camera.new
     cam.fit({ x: 0, y: 0, w: 100, h: 100 }, { w: 0, h: 600 })
     assert_equal 1.0, cam.get[:zoom]
+  end
+
+  # ── center_on：世界点 → 视口中心（小地图导航）────────
+
+  def test_center_on_formula_keeps_zoom
+    cam = Emerald::Zui::Camera.new
+    cam.center_on(100, 50, VP) # zoom 1：x' = 500 − 100，y' = 300 − 50
+    assert_equal({ x: 400.0, y: 250.0, zoom: 1.0 }, cam.get)
+
+    cam = Emerald::Zui::Camera.new(zoom: 2)
+    cam.center_on(100, 50, VP) # zoom 2：x' = 250 − 100，y' = 150 − 50
+    assert_equal({ x: 150.0, y: 100.0, zoom: 2.0 }, cam.get)
+  end
+
+  def test_center_on_world_point_lands_at_viewport_center
+    states = [
+      { x: 0.0, y: 0.0, zoom: 1.0 },
+      { x: 120.0, y: -45.0, zoom: 2.5 },
+      { x: -300.5, y: 88.25, zoom: 0.1 }
+    ]
+    points = [[0, 0], [123.5, 456.25], [999.0, 12.0], [-500.0, -700.0]]
+
+    states.each do |st|
+      cam = Emerald::Zui::Camera.new(st)
+      points.each do |wx, wy|
+        cam.center_on(wx, wy, VP)
+        assert_equal st[:zoom], cam.get[:zoom], "center_on 不得改缩放 state=#{st}"
+        center = cam.world_to_screen(wx, wy)
+        assert_in_delta VP[:w] / 2.0, center[0], 1e-6, "state=#{st} 点(#{wx},#{wy})"
+        assert_in_delta VP[:h] / 2.0, center[1], 1e-6, "state=#{st} 点(#{wx},#{wy})"
+      end
+    end
+  end
+
+  def test_center_on_keeps_zoom_at_clamp_extremes
+    cam = Emerald::Zui::Camera.new(x: 7, y: -3, zoom: 4)
+    cam.center_on(100, 50, VP) # x' = 1000/8 − 100，y' = 600/8 − 50
+    assert_equal({ x: 25.0, y: 25.0, zoom: 4.0 }, cam.get)
+
+    cam = Emerald::Zui::Camera.new(zoom: 0.1)
+    cam.center_on(5000, -2000, VP) # x' = 5000 − 5000，y' = 3000 + 2000
+    assert_equal({ x: 0.0, y: 5000.0, zoom: 0.1 }, cam.get)
+  end
+
+  def test_center_on_degenerate_viewport_does_not_crash
+    cam = Emerald::Zui::Camera.new
+    cam.center_on(100, 50, { w: 0, h: 600 }) # 公式自然退化：世界点落屏幕 x=0
+    assert_equal 1.0, cam.get[:zoom]
+    center = cam.world_to_screen(100, 50)
+    assert_in_delta 0.0, center[0], 1e-6
+    assert_in_delta 300.0, center[1], 1e-6
   end
 
   # ── 世界/屏幕换算 ────────────────────────────────────

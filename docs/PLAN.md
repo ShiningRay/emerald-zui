@@ -44,6 +44,8 @@
 emerald-zui/
   lib/emerald/zui.rb          入口（require 'emerald' 后加载本扩展）
   lib/emerald/zui/camera.rb   相机服务（纯 CRuby，§3.1）
+  lib/emerald/zui/projector.rb 世界↔小地图投影器（纯 CRuby：等比映射/逆映射/矩形并集）
+  lib/emerald/zui/minimap.rb  小地图组件（窗块缩略 + 相机取景框，点击/拖拽导航）
   lib/emerald/zui/shell.rb    ZuiShell < Emerald::DesktopShell（§3.2）
   lib/emerald/zui/gesture.rb  平移/缩放手势接线（Z1，§3.4）
   lib/emerald/zui/overview.rb ⌘0 全景 + 相机飞行动画（Z1，§3.4）
@@ -256,3 +258,25 @@ end
   编译产物审查发现，单测门禁天然盲区。
   **待办**：beryl PR #2（drag_scale）与 citrine PR #30 合并后接 Z1；
   滚轮在可滚动窗口内容上的误缩放仍未做 scrollable 感知（浏览器验收定夺）。
+- **2026-09-15 小地图第一半程（纯逻辑层落地）**：① `Camera#center_on`
+  （保缩放把世界点对到视口中心，F6 守卫同款；契约 `x' = vw/(2z) − wx`）。
+  ② `projector.rb`——`Emerald::Zui::Projector` 纯 CRuby 值对象：世界包围盒
+  ↔ 小地图像素框等比映射（短轴居中留白，padding 内缩）、`to_world` 逆映射、
+  `union` 窗口矩形并集（空 → 零矩形）；退化 bounds（w/h ≤ 0）按 1 算。
+  ③ 单测 41 项（camera +5 含 F6 扩展断言、projector 15 项新增），
+  `bundle exec rake` 双绿（minitest 51 项 + Opal 编译入包实证）。
+- **2026-09-15 小地图第二半程（组件与集成落地）**：① `minimap.rb`——
+  `Emerald::Zui::Minimap`（HUD 右下角）：窗块缩略 + 相机取景框渲染，
+  bounds 恒 = 窗口矩形 ∪ 取景框（取景框永不出图，空世界不空窗）；
+  点击/拖拽画布 = `to_world` 逆映射 → `Camera#center_on` 保缩放飞到该世界点
+  （mousedown 先飞一次、doc 级 mousemove 连飞、mouseup 摘监听，
+  shell 空白拖拽同款两段式）。信号纪律：view 内直读 camera/wm 信号是
+  刻意的——小地图 DOM 极小，整体重渲染可接受，与世界层 transform 直写
+  零重渲染策略相反（类注释留痕）。② shell.rb——HUD 接入 Minimap +
+  `screen_viewport`（Opal 读 window / CRuby 固定值；与 `current_viewport`
+  恒 nil 的 wm 钳制关闭语义分立）。③ CSS 入 zui_desktop.html（画布
+  180×120 = Projector box，overflow hidden 裁剪越界取景框）。④ 单测
+  +10 项（minimap_test 8：投影接线手算钉死/取景框任意缩放不出图/导航
+  两段纯逻辑；shell_test +2 HUD 集成），`bundle exec rake` 双绿
+  （minitest 61 项 + Opal 编译）。**待浏览器验收**：点击/拖拽手感、
+  拖动中取景框跟手。

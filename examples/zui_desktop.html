@@ -225,6 +225,20 @@
      fixed 定位保证，此处仅为语义占位与将来统一样式入口） */
   .zui-hud { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }
   .zui-hud > * { pointer-events: auto; }
+
+  /* ── 小地图（PLAN §8 防迷路：世界缩略 + 相机取景框）────────
+     固定右下角、任务栏上方；画布即 Projector 的 box（180×120），overflow
+     hidden 裁剪越出世界包围盒的取景框部分；cursor crosshair 提示可点拖导航 */
+  .zui-minimap { position: fixed; right: 8px; bottom: 48px; z-index: 4002;
+                 background: var(--panel); border: 1px solid var(--line);
+                 border-radius: var(--radius); padding: 8px; opacity: .92; }
+  .zui-minimap-canvas { position: relative; width: 180px; height: 120px;
+                        overflow: hidden; cursor: crosshair; }
+  .zui-minimap-win { position: absolute; background: var(--dim);
+                     border-radius: 1px; opacity: .7; }
+  .zui-minimap-win.is-active { background: var(--accent); opacity: 1; }
+  .zui-minimap-cam { position: absolute; border: 1px solid var(--accent);
+                     background: #4f8cff22; pointer-events: none; }
 </style>
 </head>
 <body>

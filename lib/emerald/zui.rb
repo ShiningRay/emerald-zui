@@ -8,6 +8,8 @@
 # 不 fork、不猴子补丁 citrine/beryl/emerald，缺口走反哺通道（PLAN §5）。
 require 'emerald'
 require_relative 'zui/camera'
+require_relative 'zui/projector'
+require_relative 'zui/minimap'
 require_relative 'zui/shell'
 
 module Emerald

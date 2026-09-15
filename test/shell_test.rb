@@ -41,6 +41,22 @@ class ZuiShellTest < Minitest::Test
     assert_operator html.index('tray-clock'), :>, hud_at, '托盘应在 HUD 层'
   end
 
+  def test_hud_layer_holds_minimap_with_camera_rect
+    html = render_html
+    hud_at = html.index('zui-hud')
+    minimap_at = html.index('zui-minimap')
+    refute_nil minimap_at, '小地图应在 HUD 层（屏幕固定，不随相机变换）'
+    assert_operator minimap_at, :>, hud_at
+    assert_operator html.index('zui-minimap-cam'), :>, hud_at,
+                    '空世界也渲染相机取景框（防迷路底线）'
+    refute_includes html, 'zui-minimap-win'
+
+    @shell.launch_app(:about)
+    html = render_html
+    assert_operator html.index('zui-minimap-win'), :>, hud_at, '开窗后小地图应有窗块'
+    assert_operator html.index('class="panel'), :<, hud_at, '窗口本体仍在世界层'
+  end
+
   def test_open_window_renders_inside_world_layer
     @shell.launch_app(:about)
     html = render_html

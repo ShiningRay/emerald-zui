@@ -50,12 +50,15 @@ module Emerald
       end
 
       # HUD 层：屏幕固定、不随相机变换；各组件自身 fixed 定位，
-      # .zui-hud 仅语义占位 + pointer-events 统筹（样式见 examples/zui_desktop.html）
+      # .zui-hud 仅语义占位 + pointer-events 统筹（样式见 examples/zui_desktop.html）。
+      # 小地图殿后：世界缩略 + 相机取景框，点击/拖拽 = 相机飞到该世界点
+      # （PLAN §8 防迷路；其内部读 camera/wm 信号是刻意的，见 Minimap 类注释）
       def hud_layer
         box(css_class: 'zui-hud') do
           menubar
           Beryl::Taskbar.new(wm: @wm).view
           tray
+          Minimap.new(wm: @wm, camera: @camera, viewport: -> { screen_viewport }).view
           toast_stack
         end
       end
@@ -68,6 +71,13 @@ module Emerald
       end
 
       private
+
+      # 屏幕视口真实尺寸（导航数学用：center_on / 小地图取景框）：ZUI 覆写
+      # current_viewport 恒 nil 是为了关 wm 钳制/吸附（§3.3），而相机居中与
+      # 取景框换算恰恰需要真值——Opal 读 window，CRuby 固定值（父类实现同款）
+      def screen_viewport
+        defined?(Opal) ? { w: `window.innerWidth`, h: `window.innerHeight` } : { w: 1280, h: 800 }
+      end
 
       # ── 相机接线（PLAN §3.2）────────────────────────────
 

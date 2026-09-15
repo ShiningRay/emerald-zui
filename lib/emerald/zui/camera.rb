@@ -11,8 +11,9 @@ module Emerald
     # 对应世界层容器的 CSS transform（origin 0 0，D2）：
     #   translate(x*zoom px, y*zoom px) scale(zoom)
     #
-    # 变更纪律（beryl F6 同款守卫）：set/zoom_at/pan_by/fit 只能在事件回调
-    # （wheel/drag/快捷键/任务栏点击）里调用，view/Effect 内直接 raise。
+    # 变更纪律（beryl F6 同款守卫）：set/zoom_at/pan_by/fit/center_on 只能在
+    # 事件回调（wheel/drag/快捷键/任务栏点击/小地图导航）里调用，view/Effect 内
+    # 直接 raise。
     class Camera
       MIN_ZOOM = 0.1
       MAX_ZOOM = 4.0
@@ -86,6 +87,21 @@ module Emerald
           z = clamp_zoom([(vw - 2.0 * padding) / rw, (vh - 2.0 * padding) / rh].min)
           set(x: vw / 2 / z - cx, y: vh / 2 / z - cy, zoom: z)
         end
+      end
+
+      # 保持 zoom，把世界点 (wx, wy) 移到视口中心（小地图点击/拖拽导航）：
+      # 由锁定恒等式 screen = (world + {x,y})*zoom 推出中心对齐
+      #   x' = vw/(2*zoom) - wx；y' = vh/(2*zoom) - wy
+      # viewport 形参 {w:, h:}（与 fit 同款）；视口 w/h ≤ 0 时公式自然退化，
+      # 世界点落在屏幕原点方向，不 raise。
+      def center_on(wx, wy, viewport)
+        assert_outside_effect!(:center_on)
+        s = @signal.peek
+        vw = Float(viewport[:w])
+        vh = Float(viewport[:h])
+        set(x: vw / 2.0 / s[:zoom] - Float(wx),
+            y: vh / 2.0 / s[:zoom] - Float(wy),
+            zoom: s[:zoom])
       end
 
       # ── 坐标换算（纯读取，任何上下文可调）────────────────
