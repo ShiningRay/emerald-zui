@@ -9,8 +9,14 @@
 require 'emerald'
 require_relative 'zui/camera'
 require_relative 'zui/projector'
+require_relative 'zui/morph'
+require_relative 'zui/app_form'
 require_relative 'zui/minimap'
 require_relative 'zui/shell'
+
+# 形态态机（B 方案，PLAN §3.8）：include 进 App 基类——扩展而非猴子补丁
+# （emerald 侧反哺候选，见 PLAN §5；include 开放类是 ZUI 扩展的既定通道）
+Emerald::App.include(Emerald::Zui::AppForm) if defined?(Emerald::App)
 
 module Emerald
   module Zui
