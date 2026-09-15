@@ -29,6 +29,12 @@ module Emerald
       # 在该窗内合并为一次——机器级重复（双击双派发/监听器重复挂载，同 tick
       # 连发）被吞；人类有意再双击必在窗外
       LAUNCH_DEDUP_MS = 200
+      # 相机飞行时长（CSS transition，examples/zui_desktop.html 的 .is-flying）
+      FLIGHT_MS = 280
+      # 聚焦单窗 / 全景的内边距（世界像素）
+      FOCUS_PADDING = 80
+      OVERVIEW_PADDING = 80
+
       # 图标形态 tile 的世界尺寸兜底（形变矩形对的 icon 端；正常路径取启动器
       # 实测矩形——见 assign_anchor 存下的 w/h，与桌面图标严丝合缝）
       ICON_TILE_W = 80
@@ -171,7 +177,7 @@ module Emerald
       def hud_layer
         box(css_class: 'zui-hud') do
           menubar
-          Beryl::Taskbar.new(wm: @wm).view
+          Beryl::Taskbar.new(wm: taskbar_bridge).view
           tray
           # 必须经 render(类) 挂载：.new(...).view 内联渲染不走 render_component，
           # on_mount 钩子不触发（citrine renderer.rb），小地图的画布监听永远挂不上
@@ -409,6 +415,7 @@ module Emerald
       def register_global_hotkeys
         super
         Emerald.hotkey.register('meta+q') { quit_active_app }
+        Emerald.hotkey.register('meta+0') { overview }
       end
 
       # 纯修饰键 keydown 不进 chord 解析：浏览器把单独按下的 ⌘/Shift/Alt 也
@@ -431,6 +438,79 @@ module Emerald
                                            action: -> { quit_active_app } }]
         end
         data
+      end
+
+      # ── 导航：相机飞行 / 全景 / 任务栏改道（PLAN §3.4，Z1）────────
+
+      # 相机飞行：给世界层挂 CSS transition 后再改相机，浏览器补间到位
+      #（CRuby 无 DOM：直接改相机，单测断言结果）。改相机前强制 reflow，
+      # 否则同一帧里「加 transition + 改 transform」会被合并成一次计算、
+      # 不产生过渡（浏览器实现细节，实测经验）
+      def with_flight
+        unless defined?(Opal)
+          yield
+          return
+        end
+
+        el = @world_node.dom
+        el.classList.add('is-flying')
+        el.offsetWidth # 强制 reflow：让 transition 先生效
+        yield
+        Beryl::Timer.after(FLIGHT_MS + 60) { el.classList.remove('is-flying') }
+      end
+
+      # 飞到世界矩形（fit + 内边距）
+      def fly_camera_to(rect, padding: FOCUS_PADDING)
+        with_flight { camera.fit(rect, screen_viewport, padding: padding) }
+        nil
+      end
+
+      # ⌘0 全景：所有窗口 + 图标形态实例入视野（防迷路的兜底出口，§8）；
+      # 空桌面回原点（home）
+      def overview
+        # beryl 的 each_window 是块式且显式返回 nil（R5：空表不外泄 "[]"），
+        # 不能当 Enumerable 用——手工收集
+        rects = []
+        @wm.each_window do |rec|
+          g = @wm.geometry(rec.id)
+          rects << g if g
+        end
+        @registry.each_running.each do |inst|
+          next unless inst.form == :icon && inst.icon_geometry
+
+          rects << icon_form_rect(inst).slice(:x, :y, :w, :h)
+        end
+
+        if rects.empty?
+          with_flight { camera.home }
+        else
+          fly_camera_to(Projector.union(rects), padding: OVERVIEW_PADDING)
+        end
+        nil
+      end
+
+      # 任务栏「最小化」（点激活窗）：与 ✕ 同语义 = 收起为图标（§3.8）
+      def collapse_window(win_id)
+        inst = @registry.instance(win_id)
+        if inst && inst.form == :window
+          morph_to_icon(inst)
+        else
+          @wm.toggle_min(win_id)
+        end
+        nil
+      end
+
+      # 任务栏「切到该窗」（点后台/最小化窗）：聚焦 + 相机飞行到该窗
+      def focus_window_with_flight(win_id)
+        @wm.focus(win_id)
+        g = @wm.geometry(win_id)
+        fly_camera_to(g, padding: FOCUS_PADDING) if g
+        nil
+      end
+
+      # 任务栏桥接（hud_layer 的 Beryl::Taskbar 消费）
+      def taskbar_bridge
+        @taskbar_bridge ||= TaskbarBridge.new(wm: @wm, shell: self)
       end
 
       private
@@ -467,9 +547,11 @@ module Emerald
           on_front: ->(_el) { @wm.focus(id) },
           on_move: ->(ev) { @wm.place(id, ev, snap: snap) },
           on_resize: ->(ev) { @wm.place(id, ev) },
-          on_head_dblclick: ->(_ev) { @wm.toggle_max(id) },
+          # D3 定案：ZUI 下「最大化」= 让该窗充满视野（相机 fit）——wm 的
+          # toggle_max 依赖视口几何（§3.3 viewport 恒 nil），在此语义下不适用
+          on_head_dblclick: ->(_ev) { fly_camera_to(@wm.geometry(id)) },
           on_minimize: -> { morph_to_icon(inst) },
-          on_maximize: -> { @wm.toggle_max(id) },
+          on_maximize: -> { fly_camera_to(@wm.geometry(id)) },
           on_close: -> { close_window(id) },
           css_class: win_frame_class(inst),
           **flags, **opts

@@ -247,6 +247,65 @@ class ZuiShellTest < Minitest::Test
                  '窗口 = 图标当前位置长出（位置随图标，尺寸随窗口备份）')
   end
 
+  # ── Z1 导航（§3.4：相机飞行 / ⌘0 全景 / 最大化=fit）──────────────
+
+  def test_overview_fits_all_windows_into_viewport
+    @shell.stub(:now_ms, 1000) { @shell.launch_app(:about) }
+    @shell.stub(:now_ms, 5000) { @shell.launch_app(:clock) }
+    @shell.wm.place(:about, { x: -800, y: -400, w: 380, h: 280 })
+    @shell.wm.place(:clock, { x: 1600, y: 1200, w: 320, h: 340 })
+
+    @shell.overview
+
+    cam = @shell.camera.get
+    assert_operator cam[:zoom], :<, 1.0, '全景必然缩小到装得下所有窗口'
+    [-800, 1600].each_slice(1) do |(x)|
+      sx = (x + cam[:x]) * cam[:zoom]
+      assert sx.between?(-1, 1281), "窗口 x=#{x} 应入视野（投影 #{sx.round}）"
+    end
+  end
+
+  def test_overview_includes_icon_form_instances
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+    @shell.place_icon_at({ inst: inst, x: 5000, y: 4000 }) # 收起态拖远
+
+    @shell.overview
+
+    cam = @shell.camera.get
+    sx = (5000 + cam[:x]) * cam[:zoom]
+    assert sx.between?(-1, 1281), '图标形态实例也要入视野（否则全景漏掉缩起的对象）'
+  end
+
+  def test_overview_with_empty_desktop_goes_home
+    @shell.camera.set(x: 900, y: 400, zoom: 2.0)
+    @shell.overview
+
+    assert_equal({ x: 0.0, y: 0.0, zoom: 1.0 }, @shell.camera.get, '空桌面回原点')
+  end
+
+  def test_maximize_fits_camera_to_window
+    inst = @shell.launch_app(:about)
+    @shell.wm.place(:about, { x: 2000, y: 1500, w: 380, h: 280 })
+
+    @shell.send(:window_frame, inst).on_maximize.call
+
+    cam = @shell.camera.get
+    refute_equal 1.0, cam[:zoom], 'ZUI 最大化 = 相机 fit 到该窗（D3）'
+    sx = (2000 + cam[:x]) * cam[:zoom]
+    sy = (1500 + cam[:y]) * cam[:zoom]
+    assert sx.between?(0, 1280) && sy.between?(0, 800), '窗口左上角入视野'
+  end
+
+  def test_overview_hotkey_registered
+    @shell.launch_app(:about)
+    @shell.camera.set(x: 3000, y: 2000, zoom: 0.5)
+
+    assert Emerald.hotkey.dispatch({ key: '0', meta: true }), '⌘0 应命中全景'
+
+    refute_equal 0.5, @shell.camera.get[:zoom], '全景改变取景'
+  end
+
   # ── Z1.5 修订（§3.8 表征互斥 + 槽位恒定，2026-09-16 用户复查）──────
 
   def test_launcher_yields_slot_while_instance_exists

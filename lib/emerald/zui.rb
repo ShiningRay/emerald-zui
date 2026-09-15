@@ -11,6 +11,7 @@ require_relative 'zui/camera'
 require_relative 'zui/projector'
 require_relative 'zui/morph'
 require_relative 'zui/app_form'
+require_relative 'zui/taskbar_bridge'
 require_relative 'zui/minimap'
 require_relative 'zui/shell'
 

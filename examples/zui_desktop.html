@@ -221,6 +221,10 @@
      内部 fixed 定位（图标网格）随 transform 相对本容器——正是世界语义 */
   .zui-world { position: absolute; left: 0; top: 0; width: 100000px; height: 100000px;
                transform-origin: 0 0; will-change: transform; }
+  /* 相机飞行（PLAN §3.4 任务栏=fit / ⌘0 全景 / 最大化=fit）：飞行期给世界层
+     挂补间，飞完由 shell 摘类（FLIGHT_MS + 60ms 兜底）。时长与 shell.rb
+     的 FLIGHT_MS 保持一致 */
+  .zui-world.is-flying { transition: transform 280ms cubic-bezier(.4, 0, .2, 1); }
   /* HUD 层：屏幕固定，不随相机变换（菜单栏/任务栏/托盘/Toast 由自身
      fixed 定位保证，此处仅为语义占位与将来统一样式入口） */
   .zui-hud { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }
