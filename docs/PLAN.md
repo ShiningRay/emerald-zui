@@ -258,6 +258,15 @@ end
   编译产物审查发现，单测门禁天然盲区。
   **待办**：beryl PR #2（drag_scale）与 citrine PR #30 合并后接 Z1；
   滚轮在可滚动窗口内容上的误缩放仍未做 scrollable 感知（浏览器验收定夺）。
+- **2026-09-15 小地图落地**（`1eeb63e`，61 项全绿）：防迷路三件套之二。
+  `Camera#center_on` + `Projector`（世界↔小地图等比映射）+ `Minimap` 组件
+  （bounds 恒 = 窗口 ∪ 相机取景框，取景框永不出图）。**浏览器实证抓到框架
+  级坑**：`Minimap.new(...).view` 内联挂载不走 `render_component`，
+  on_mount 不触发、画布零监听（点击/拖拽导航静默失效、console 无报错）——
+  组件挂监听必须 `render(类, props)`（shell.rb hud_layer 已改，注释留痕）。
+  复验全过：点击导航世界点落视口中心零误差、拖拽跟手、松手稳定。
+  **待查**：双击桌面图标一次开出两个应用实例（3 次 dblclick → 4 窗，
+  两次复现）——疑似 emerald 图标双击/单击竞争或监听器重复，与小地图无关。
 - **2026-09-15 小地图第一半程（纯逻辑层落地）**：① `Camera#center_on`
   （保缩放把世界点对到视口中心，F6 守卫同款；契约 `x' = vw/(2z) − wx`）。
   ② `projector.rb`——`Emerald::Zui::Projector` 纯 CRuby 值对象：世界包围盒

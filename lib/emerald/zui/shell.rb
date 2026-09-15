@@ -58,7 +58,11 @@ module Emerald
           menubar
           Beryl::Taskbar.new(wm: @wm).view
           tray
-          Minimap.new(wm: @wm, camera: @camera, viewport: -> { screen_viewport }).view
+          # 必须经 render(类) 挂载：.new(...).view 内联渲染不走 render_component，
+          # on_mount 钩子不触发（citrine renderer.rb），小地图的画布监听永远挂不上
+          # （浏览器实证：点击/拖拽导航失效、canvas 零监听）
+          render(Emerald::Zui::Minimap, wm: @wm, camera: @camera,
+                 viewport: -> { screen_viewport })
           toast_stack
         end
       end
