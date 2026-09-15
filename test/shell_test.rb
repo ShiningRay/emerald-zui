@@ -18,16 +18,19 @@ class ZuiShellTest < Minitest::Test
 
   # ── 分层组装（PLAN §3.2）─────────────────────────────
 
-  def test_world_layer_wraps_wallpaper_icons_and_hud_comes_after
+  def test_stage_wraps_world_and_hud_comes_after
     html = render_html
+    stage_at = html.index('zui-stage')
     world_at = html.index('zui-world')
     hud_at = html.index('zui-hud')
+    refute_nil stage_at, '舞台层（屏幕固定：手势 + 视觉底层）应存在'
     refute_nil world_at, '世界层容器应存在'
     refute_nil hud_at, 'HUD 层容器应存在'
+    assert_operator stage_at, :<, world_at, '世界层应在舞台层内'
     assert_operator world_at, :<, hud_at, '世界层应先于 HUD 层（DOM 序 = 层叠序）'
-    assert_operator html.index('desktop-wallpaper'), :>, world_at, '壁纸应在世界层内'
     assert_operator html.index('icon-grid'), :>, world_at, '图标网格应在世界层内'
-    assert_operator html.index('desktop-wallpaper'), :<, hud_at
+    assert_nil html.index('desktop-wallpaper'),
+               '壁纸不再渲染世界内壁纸盒（越界露馅），改由 .zui-stage 的 CSS 背景承载'
   end
 
   def test_hud_layer_holds_menubar_taskbar_tray

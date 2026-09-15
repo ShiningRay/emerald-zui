@@ -207,15 +207,20 @@
   .about-kernel { color: var(--dim); line-height: 1.6; }
 
   /* ── ZUI 专属（docs/PLAN.md §3.2）────────────────────── */
-  /* 世界层：无限画布容器。尺寸取超大固定值（世界坐标范围），transform 由
-     相机 Effect 直写（translate + scale，origin 0 0），不经过 view 重渲染。
-     注意：内部壁纸/图标网格的 fixed 定位在此容器内会随 transform 一起变换
-     （transform 使后代 fixed 相对容器定位）——这正是世界语义想要的行为 */
+  /* 舞台层：屏幕固定（inset 0）、不随相机变换。两个职责：
+     ① 视觉底层——壁纸背景（var(--wallpaper)，主题切换生效）。世界容器只有
+        100000²，越界区域（负世界坐标方向）若无 stage 兜底会露出 body 底色；
+     ② 手势承载——滚轮缩放/拖拽平移的监听挂在 stage（屏幕固定满视野），
+        世界内外处处可交互。cursor 为平移手势光标 */
+  .zui-stage { position: fixed; inset: 0; z-index: 0; background: var(--wallpaper);
+               cursor: grab; }
+  .zui-stage.is-panning { cursor: grabbing; }
+  /* 世界层：相机 transform 容器（translate + scale，origin 0 0，transform 由
+     相机 Effect 直写，不经过 view 重渲染）。绝对定位的包含块是 stage，
+     left/top 0 即视口原点——文档坐标与世界坐标一致（PLAN §3.1 恒等式前提）。
+     内部 fixed 定位（图标网格）随 transform 相对本容器——正是世界语义 */
   .zui-world { position: absolute; left: 0; top: 0; width: 100000px; height: 100000px;
                transform-origin: 0 0; will-change: transform; }
-  /* 世界层空白处：平移手势抓取光标（落点回写，见 PLAN §3.4） */
-  .zui-world-pan { cursor: grab; }
-  .zui-world-pan.is-panning { cursor: grabbing; }
   /* HUD 层：屏幕固定，不随相机变换（菜单栏/任务栏/托盘/Toast 由自身
      fixed 定位保证，此处仅为语义占位与将来统一样式入口） */
   .zui-hud { position: fixed; inset: 0; pointer-events: none; z-index: 2000; }

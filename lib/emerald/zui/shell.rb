@@ -17,7 +17,7 @@ module Emerald
 
       attr_reader :camera
 
-      # 挂载后接线（在父类钩子之后）：相机 transform Effect + 世界层输入监听。
+      # 挂载后接线（在父类钩子之后）：相机 transform Effect + 舞台输入监听。
       # SSR/CRuby 不建 Effect，两个钩子内部 defined?(Opal) 守卫，安全跳过
       on_mount :setup_camera_effect, :setup_world_input
 
@@ -26,21 +26,26 @@ module Emerald
         super
       end
 
-      # ── 视图组装（PLAN §3.2）────────────────────────────
+      # ── 视图组装（PLAN §3.2）：stage（屏幕固定）→ 世界（相机容器）→ HUD
 
       def view
-        world_layer
+        stage_layer
         hud_layer
       end
 
-      # 世界层：壁纸/图标/窗口全部落在相机容器内，随 transform 一起变换
-      # （内部 fixed 定位因此相对本容器——正是世界语义，§3.2）。节点挂
-      # @world_node：挂载钩子要拿它的 DOM 建相机 Effect 与手势监听
-      def world_layer
-        @world_node = box(css_class: 'zui-world zui-world-pan') do
-          wallpaper
-          icon_grid
-          each_window_frame
+      # 舞台层：屏幕固定、不随相机变换。手势（滚轮/拖拽平移）与视觉底层
+      # （壁纸背景）都挂在这里——世界容器只有 100000²，越出它的区域
+      # （如平移到负世界坐标方向）若没有 stage 兜底，滚轮/拖拽会落在
+      # body 上无监听、颜色露 body 底色（Z0 验收实测 bug，本层即修复）；
+      # 壁纸不再渲染世界内壁纸盒，改由 .zui-stage 的 CSS 背景承载
+      # （var(--wallpaper)，主题切换继续生效），世界内外颜色天然一致。
+      # @stage_node 挂监听；@world_node 挂相机 transform（两个挂载钩子用）
+      def stage_layer
+        @stage_node = box(css_class: 'zui-stage') do
+          @world_node = box(css_class: 'zui-world') do
+            icon_grid
+            each_window_frame
+          end
         end
       end
 
@@ -88,12 +93,14 @@ module Emerald
 
       # ── 输入接线（PLAN §3.4，浏览器侧适配层）──────────────
 
-      # 世界层输入：滚轮锚点缩放 + 空白拖拽平移。不用 beryl L1 wheel 原语——
-      # 它的 payload 只有 {delta_x, delta_y}，锚点缩放需要指针坐标（clientX/Y）
+      # 世界层输入：滚轮锚点缩放 + 空白拖拽平移，监听挂在**舞台层**而非世界
+      # 容器（stage 屏幕固定满视野——世界外的负坐标区域同样可交互，见
+      # stage_layer 注释）。不用 beryl L1 wheel 原语——它的 payload 只有
+      # {delta_x, delta_y}，锚点缩放需要指针坐标（clientX/Y）
       def setup_world_input
         return unless defined?(Opal)
 
-        el = @world_node.dom
+        el = @stage_node.dom
         el.addEventListener('wheel', ->(raw) { on_world_wheel(Native(raw)) })
         el.addEventListener('mousedown', ->(raw) { begin_world_pan(Native(raw)) })
       end
@@ -120,19 +127,20 @@ module Emerald
         return unless world_pan_target?(ev[:target])
 
         ev.preventDefault
-        el = @world_node.dom
+        stage = @stage_node.dom
+        world = @world_node.dom
         doc = Native(`document`)
         sx = ev[:clientX]
         sy = ev[:clientY]
         base = camera.get
-        el.classList.add('is-panning')
+        stage.classList.add('is-panning')
         ldx = 0
         ldy = 0
         on_move = nil
         on_up = ->(_raw) {
           doc.removeEventListener('mousemove', on_move)
           doc.removeEventListener('mouseup', on_up)
-          el.classList.remove('is-panning')
+          stage.classList.remove('is-panning')
           handle_event(:commit_pan, { dx: ldx, dy: ldy })
         }
         on_move = ->(raw2) {
@@ -141,7 +149,7 @@ module Emerald
           ldy = e2[:clientY] - sy
           # 手势跟随：抓取语义——内容随光标同向移动（与 pan_by 同式加号），
           # 直写 style 不进 signal——松手才落点回写
-          el[:style][:transform] = camera_transform(
+          world[:style][:transform] = camera_transform(
             x: base[:x] + ldx / base[:zoom],
             y: base[:y] + ldy / base[:zoom],
             zoom: base[:zoom]
