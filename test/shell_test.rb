@@ -264,6 +264,13 @@ class ZuiShellTest < Minitest::Test
     assert_nil @shell.registry.instance(:about), 'quit → 真退出'
   end
 
+  def test_zui_service_launch_from_window_still_opens
+    @shell.launch_app(:spotlight)
+    @shell.services[:zui][:launch].call(:about, :spotlight)
+    assert_includes @shell.wm.windows, :about, '带来源窗口的启动照常开窗（CRuby 无形变）'
+    assert_equal :window, @shell.registry.instance(:about).form
+  end
+
   def test_zui_service_launch_opens_window
     @shell.services[:zui][:launch].call(:about)
     assert_includes @shell.wm.windows, :about, 'launch 经 shell 开窗（R2：registry 只建实例）'

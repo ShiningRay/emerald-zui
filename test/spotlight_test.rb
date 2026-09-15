@@ -42,7 +42,7 @@ class ZuiSpotlightTest < Minitest::Test
     @app = Emerald::Zui::Apps::Spotlight.new
     @app.boot(launcher: @registry,
               zui: {
-                launch: ->(app_id) { @calls << [:launch, app_id] },
+                launch: ->(app_id, from = nil) { @calls << [:launch, app_id, from] },
                 quit: ->(win_id) { @calls << [:quit, win_id] },
                 focus: ->(win_id) { @calls << [:focus, win_id] },
                 restore: ->(win_id) { @calls << [:restore, win_id] },
@@ -80,7 +80,8 @@ class ZuiSpotlightTest < Minitest::Test
 
   def test_activate_routes_by_state
     @app.activate(:about)
-    assert_includes @calls, [:launch, :about], '未运行 → 经 shell 服务启动（开窗归 shell，R2）'
+    assert_includes @calls, [:launch, :about, @app.win_id],
+                    '未运行 → 经 shell 服务启动，并带上自身 win_id（新窗从启动器形变长出）'
 
     @running << FakeInst.new(:clock, :clock, :icon)
     @app.activate(:clock)
@@ -108,7 +109,7 @@ class ZuiSpotlightTest < Minitest::Test
   def test_activate_selected_uses_cursor
     @app.query = '时'
     @app.activate_selected
-    assert_includes @calls, [:launch, :clock], '回车执行选中项'
+    assert_includes @calls, [:launch, :clock, @app.win_id], '回车执行选中项'
   end
 
   def test_escape_collapses_spotlight_itself

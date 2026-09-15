@@ -72,8 +72,9 @@ module Emerald
           inst = instances_of(app_id).last
           case app_state(app_id)
           when :idle
-            # 经 shell 的 launch 服务开窗（registry.launch 只建实例，R2）
-            zui_op(:launch, app_id)
+            # 经 shell 的 launch 服务开窗（registry.launch 只建实例，R2）；
+            # 带上自己的 win_id → 新窗从启动器面板形变长出
+            zui_op(:launch, app_id, win_id)
           when :icon
             zui_op(:restore, inst.win_id)
           else

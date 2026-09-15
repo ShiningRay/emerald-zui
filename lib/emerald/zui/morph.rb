@@ -57,6 +57,7 @@ module Emerald
           @morphing = true
           ghost = panel_el.cloneNode(true)
           strip_clone_ids(ghost)
+          strip_hook_classes(ghost)
           ghost[:className] = "#{ghost[:className]} zui-morph-ghost"
           gs = ghost[:style]
           # 初始几何 = 源形态世界矩形（内联；CSS 类只管静态语义，见示例页）
@@ -122,6 +123,18 @@ module Emerald
 
         def px(n)
           "#{num(n, 2)}px"
+        end
+
+        # 幽灵不是真面板：剥掉窗口挂钩类（zui-win-* 等 zui- 前缀行为类）——
+        # 否则按类查询的地方（小地图缩略图同步）会把幽灵当成真面板克隆并
+        # 改写它的内联定位/transform，飞行动画中途被打断（浏览器实证：
+        # 幽灵被写成缩略图比例 scale(0.1139)、left/top 归 0）
+        def strip_hook_classes(clone)
+          %x{
+            var el = #{clone.to_n};
+            el.className = el.className.replace(/\bzui-(win|iconform)-\S+/g, '').trim();
+          }
+          nil
         end
 
         # 克隆体剥掉全部 id：与真实面板同 id 进文档会串（getElementById/

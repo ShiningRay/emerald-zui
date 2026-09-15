@@ -273,7 +273,7 @@ module Emerald
       # ③ 建实例 → 锚位取**启动器槽位** → form 先置 :window（启动器随之让位，
       #    表征互斥）→ 幽灵从图标矩形飞涨到窗口矩形 → 收尾 wm.open 出窗。
       # CRuby/无槽位 → 直接开窗（Morph 契约与槽位测量的兜底路径）
-      def launch_app(id, **argv)
+      def launch_app(id, from_win_id: nil, **argv)
         return super if argv.any?
 
         key = id.to_sym
@@ -299,23 +299,41 @@ module Emerald
           return inst
         end
 
-        open_with_morph(inst)
+        open_with_morph(inst, from_win_id: from_win_id)
         inst
       end
 
       # 带形变的开窗：锚位 → form :window → bump morph_tick（启动器让位 +
       # 形变期两端都不渲染，只有幽灵）→ 幽灵从图标矩形飞涨到窗口矩形 →
       # wm.open（渲染仍被 @morphing 压着）→ 收尾 finish_morph 出窗
-      # 开窗（启动路径）：锚位 → form :window → 直接在锚位出窗。
-      # 无「从图标长出」形变——桌面已无启动器图标可作源（§3.8 修订③）；
-      # 窗口 ⇄ 图标的形变（收起/涨回）是形态态机的核心，照旧保留
-      def open_with_morph(inst)
+      # 开窗（启动路径）：锚位 → form :window → 出窗。
+      # from_win_id 给了源窗口（启动器）→ 幽灵从该窗面板飞向新窗（观感
+      # 「应用从启动器里长出来」）；不给则直接出窗（桌面已无启动器图标可
+      # 长出，§3.8 修订③）。窗口 ⇄ 图标的形变（收起/涨回）照旧保留
+      def open_with_morph(inst, from_win_id: nil)
         assign_anchor(inst)
         inst.form = :window
         g = window_rect_for(inst, nil)
+        src = morph_source_for(from_win_id)
         self.morph_tick = morph_tick + 1
+        if src
+          @morphing[inst.win_id] = true
+          fly_morph(inst, from: src[:rect], to: g, from_class: src[:class])
+        end
         @wm.open(inst.win_id, title: inst.class.app_title, geometry: g)
         inst
+      end
+
+      # 形变源（启动器窗口）：矩形取 wm 几何（世界坐标，无需 DOM 测量），
+      # 元素类取窗口挂钩类（fly_morph 克隆用）。CRuby 无形变（无 DOM），
+      # win_id 无效/null 时返回 nil → 直接出窗
+      def morph_source_for(from_win_id)
+        return nil unless from_win_id && defined?(Opal)
+
+        rect = @wm.geometry(from_win_id)
+        return nil unless rect
+
+        { rect: rect, class: "zui-win-#{sanitize_win_id(from_win_id)}" }
       end
 
       # 锚位（§3.8 槽位恒定不变量）：桌面无启动器后，锚位取**图标列的空槽**
@@ -493,8 +511,10 @@ module Emerald
       def build_zui_services
         {
           # 启动必须走 shell 的 launch_app（R2：registry.launch 只建实例，
-          # 开窗/锚位/形变归 shell）——应用拿到的服务面里这是唯一启动入口
-          launch: ->(app_id) { launch_app(app_id) },
+          # 开窗/锚位/形变归 shell）。可选第二参 = 「从哪来」（调用方窗口
+          # win_id）：传了就让形变幽灵从那扇窗飞向新窗（启动器调用即
+          # 「应用从启动器里长出来」），不传则直接出窗
+          launch: ->(app_id, from_win_id = nil) { launch_app(app_id, from_win_id: from_win_id) },
           quit: ->(win_id) { quit_app(win_id) },
           focus: ->(win_id) { focus_window_with_flight(win_id) },
           restore: lambda { |win_id|

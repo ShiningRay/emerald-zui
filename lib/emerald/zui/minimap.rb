@@ -216,7 +216,9 @@ module Emerald
         wm.each_window do |r| # z 序遍历：后开窗的缩略图在上层
           # 选择器 sanitize：win_id 含 '#'（多实例 about#2）会被当成 id 选择器，
           # 规则与 shell.rb win_frame_class 的挂钩类生成必须一致（改一处另一处跟）
-          panel = doc.querySelector(".zui-world .zui-win-#{r.id.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')}")
+          # :not(.zui-morph-ghost) 双保险：形变幽灵虽已剥挂钩类（morph.rb
+          # strip_hook_classes），仍显式排除——它只是视觉克隆，不是真面板
+          panel = doc.querySelector(".zui-world .zui-win-#{r.id.to_s.gsub(/[^a-zA-Z0-9_-]/, '_')}:not(.zui-morph-ghost)")
           next unless panel # 面板未挂载（最小化等）：跳过，色块仍在
 
           g = r.geom.get
