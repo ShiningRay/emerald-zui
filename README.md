@@ -1,5 +1,7 @@
 # emerald-zui
 
+[![CI](https://github.com/ShiningRay/emerald-zui/actions/workflows/ci.yml/badge.svg)](https://github.com/ShiningRay/emerald-zui/actions/workflows/ci.yml)
+
 Emerald OS 的 ZUI（Zoomable User Interface）视口扩展：无限画布桌面——
 相机缩放即导航、平移即浏览，经典桌面是其退化形态。
 
