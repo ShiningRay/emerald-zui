@@ -29,9 +29,10 @@ module Emerald
       # 在该窗内合并为一次——机器级重复（双击双派发/监听器重复挂载，同 tick
       # 连发）被吞；人类有意再双击必在窗外
       LAUNCH_DEDUP_MS = 200
-      # 图标形态 tile 的世界尺寸（形变矩形对的 icon 端；live tile 即此盒）
-      ICON_TILE_W = 88
-      ICON_TILE_H = 88
+      # 图标形态 tile 的世界尺寸兜底（形变矩形对的 icon 端；正常路径取启动器
+      # 实测矩形——见 assign_anchor 存下的 w/h，与桌面图标严丝合缝）
+      ICON_TILE_W = 80
+      ICON_TILE_H = 69
 
       attr_reader :camera
 
@@ -319,7 +320,9 @@ module Emerald
           !other.equal?(inst) && other.class.app_id == inst.class.app_id
         end
         if slot && seq.zero?
-          inst.icon_geometry = { x: slot[:x], y: slot[:y] }
+          # 记全矩形（含实测宽高）：tile 尺寸与形变落点都用它——缩回后与
+          # 桌面图标严丝合缝，不留「88×88 深色卡片」那种跳变
+          inst.icon_geometry = { x: slot[:x], y: slot[:y], w: slot[:w], h: slot[:h] }
         else
           inst.icon_geometry = AppForm.icon_slot(slot || FALLBACK_GEOMETRY, seq)
         end
@@ -502,41 +505,39 @@ module Emerald
         inst.icon_geometry = AppForm.icon_slot(base, seq)
       end
 
-      # 图标形态的世界矩形（形变矩形对的 icon 端；位置 = 驻留几何，尺寸 =
-      # tile 定值，radius = tile 圆角——幽灵 border-radius 随之形变，morph.rb
-      # 契约的可选键。坐标缺失时退化兜底几何原点）
+      # 图标形态 tile 的世界矩形（形变矩形对的 icon 端）：位置与尺寸取锚位
+      # 实测值（启动时从启动器量得，见 assign_anchor），缺尺寸时退兜底常量；
+      # radius 取桌面图标圆角（10，= .d-icon 的 var(--radius)）
       def icon_form_rect(inst)
         g = inst.icon_geometry || FALLBACK_GEOMETRY
-        { x: g[:x], y: g[:y], w: ICON_TILE_W, h: ICON_TILE_H, radius: 12 }
+        { x: g[:x], y: g[:y], w: g[:w] || ICON_TILE_W, h: g[:h] || ICON_TILE_H, radius: 10 }
       end
 
       # ── 图标 tile 内部段 ───────────────────────────────────
 
-      # tile 挂钩类（跨路线契约）：zui-iconform zui-iconform-<sanitized id>——
+      # tile 挂钩类（跨路线契约）：zui-iconform zui-iconform-<sanitized id> 在
+      # 前，**共用 .d-icon 视觉**（与启动器同款：透明底/圆角/hover/选中态）；
       # sanitize 规则与 win_frame_class / minimap.rb 的 querySelector 一致；
-      # is-selected 为单击选中态（与 d-icon 同款状态类后缀）
+      # is-selected 为单击选中态（与启动器同款状态类）
       def icon_form_class(inst)
-        cls = "zui-iconform zui-iconform-#{sanitize_win_id(inst.win_id)}"
+        cls = "zui-iconform d-icon zui-iconform-#{sanitize_win_id(inst.win_id)}"
         cls += ' is-selected' if selected_icons.include?("iconform:#{inst.win_id}")
         cls
       end
 
-      # tile 世界定位 + 静态观感（样式全内联：图标 tile 的 CSS 段不在本仓
-      # 样式表内，与时钟应用同款纪律）：位置/尺寸是布局量（世界坐标），
-      # 相机 transform 只改视觉不改布局（§3.1 恒等式前提）
+      # tile 世界定位 + 观感：**与桌面启动器图标同款**——复用 `.d-icon` 的
+      # 视觉（透明底、无边框、无投影、圆角 var(--radius)、hover/选中态），
+      # 尺寸取锚位实测值（与启动器一致）。位置/尺寸是布局量（世界坐标），
+      # 相机 transform 只改视觉不改布局（§3.1 恒等式前提）。
+      # z_index 必须 > .icon-grid 的 1（emerald 页面壳给图标网格设了 z-index: 1）：
+      # tile 常驻启动器槽位、与网格同区重叠——不抬层就被网格盖住、点击全被
+      # 网格接走（双击涨回失效，浏览器实证踩坑）
       def icon_form_style(g)
         { position: 'absolute',
           left: "#{g[:x]}px", top: "#{g[:y]}px",
-          width: "#{ICON_TILE_W}px", height: "#{ICON_TILE_H}px",
-          # z_index 必须 > .icon-grid 的 1（emerald 页面壳给图标网格设了
-          # z-index: 1）：tile 常驻启动器槽位，与网格同区重叠——不抬层就被
-          # 网格盖住、点击全被网格接走（双击涨回失效，浏览器实证踩坑）
+          width: "#{g[:w] || ICON_TILE_W}px", height: "#{g[:h] || ICON_TILE_H}px",
           z_index: 2,
-          display: 'flex', flex_direction: 'column', align_items: 'center',
-          justify_content: 'center', gap: '6px',
-          background: 'rgba(17, 21, 31, .88)', border: '1px solid #232b3b',
-          border_radius: '12px', box_shadow: '0 6px 18px rgba(0, 0, 0, .35)',
-          cursor: 'pointer', user_select: 'none' }
+          cursor: 'pointer' }
       end
 
       def select_icon_form(inst)

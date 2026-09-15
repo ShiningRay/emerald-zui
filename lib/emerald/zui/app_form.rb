@@ -72,22 +72,15 @@ module Emerald
           y: base_geometry[:y] + seq * ICON_SLOT_OFFSET }
       end
 
-      # 图标形态默认视图（D7 兼容降级：glyph + 标题徽标，样式全内联——
-      # 图标 tile 的 CSS 段不在本仓样式表内）。覆写即活图标：icon_view 内
-      # 读实例 signal → 样式/徽标，天然实时（垃圾桶空满、邮箱未读、时钟
-      # 指针同机制，PLAN §3.8 dogfood 计划）
+      # 图标形态默认视图：与桌面启动器图标**完全同款**——复用 .d-icon-glyph /
+      # .d-icon-name 的页面 CSS（不另造样式、不内联外观），窗口缩回后看到的
+      # 就是那颗图标，而不是一个「迷你窗口」样的深色卡片（用户验收反馈：
+      # tile 曾带不透明底 + 边框 + 投影）。覆写即活图标：icon_view 内读实例
+      # signal → 样式/徽标，天然实时（垃圾桶空满、邮箱未读、时钟指针同机制）
       def icon_view
-        box(css_class: 'zui-iconform-default',
-            style: { display: 'flex', flex_direction: 'column', align_items: 'center',
-                     justify_content: 'center', gap: '4px', width: '100%', height: '100%' }) do
-          box(css_class: 'zui-iconform-glyph', style: { font_size: '30px', line_height: '1.1' }) do
-            self.class.app_icon.to_s
-          end
-          box(css_class: 'zui-iconform-name',
-              style: { font_size: '11px', text_align: 'center', opacity: '0.85',
-                       word_break: 'break-all', line_height: '1.2', padding: '0 4px' }) do
-            self.class.app_title.to_s
-          end
+        box(css_class: 'zui-iconform-default') do
+          box(css_class: 'd-icon-glyph') { self.class.app_icon.to_s }
+          label(css_class: 'd-icon-name') { self.class.app_title.to_s }
         end
       end
     end

@@ -155,8 +155,8 @@ class ZuiShellTest < Minitest::Test
                  '退化为兜底几何级联序 0，与窗口位置无关')
 
     html = render_html
-    assert_includes html, 'zui-iconform zui-iconform-about', 'tile 挂钩类（契约）'
-    assert_includes html, 'zui-iconform-glyph', '默认 icon_view：glyph（D7 兼容降级）'
+    assert_includes html, 'zui-iconform d-icon zui-iconform-about', 'tile 挂钩类（契约）'
+    assert_includes html, 'd-icon-glyph', '默认 icon_view：glyph（D7 兼容降级）'
     assert_includes html, '◈', 'glyph 取 app_icon'
     assert_includes html, 'left:120px;top:90px', 'tile 定位于驻留几何（世界坐标）'
     refute_includes html, 'panel-head', '窗口本体不渲染（form 分派）'
@@ -205,10 +205,10 @@ class ZuiShellTest < Minitest::Test
     assert_includes @shell.wm.windows, :'morph_test#2', 'b 仍在窗口登记'
 
     html = render_html
-    assert_includes html, 'zui-iconform zui-iconform-morph_test'
+    assert_includes html, 'zui-iconform d-icon zui-iconform-morph_test'
 
     @shell.morph_to_icon(b)
-    assert_includes render_html, 'zui-iconform zui-iconform-morph_test_2',
+    assert_includes render_html, 'zui-iconform d-icon zui-iconform-morph_test_2',
                     '多实例 id 的 # 消毒为 _（与 win_frame_class 同规则）'
     assert_equal({ x: 144, y: 114 }, b.icon_geometry,
                  '级联序 1（§3.8 修订：锚位在启动时定，CRuby 兜底几何 + 24 错开）')
@@ -247,7 +247,7 @@ class ZuiShellTest < Minitest::Test
     @shell.morph_to_icon(inst)
     html = render_html
     refute_includes html, 'd-icon-app-about', '收起态：槽位由实例的图标形态接管'
-    assert_includes html, 'zui-iconform zui-iconform-about'
+    assert_includes html, 'zui-iconform d-icon zui-iconform-about'
 
     @shell.quit_app(:about)
     assert_includes render_html, 'd-icon-app-about', '退出后启动器回归'
@@ -260,7 +260,7 @@ class ZuiShellTest < Minitest::Test
     assert_equal :icon, inst.form, '✕/⌘W 在 ZUI = 收起为图标（不销毁实例）'
     assert_same inst, @shell.registry.instance(:about), '实例仍在 registry'
     assert_empty @shell.wm.windows, '窗口记录已摘'
-    assert_includes render_html, 'zui-iconform zui-iconform-about', '还原为图标'
+    assert_includes render_html, 'zui-iconform d-icon zui-iconform-about', '还原为图标'
   end
 
   def test_quit_app_disposes_instance_and_file_icon_route_untouched
