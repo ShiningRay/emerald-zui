@@ -150,14 +150,15 @@ class ZuiShellTest < Minitest::Test
     assert_empty @shell.wm.windows, 'wm 只登记窗口形态实例（实例留 registry）'
     assert_equal({ x: 200, y: 120, w: 380, h: 280 }, inst.window_geometry_backup,
                  '缩起暂存窗口几何')
-    assert_equal({ x: 200, y: 120 }, inst.icon_geometry,
-                 '首缩起驻留位 = 窗口位置（级联序 0，落图标几何位）')
+    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
+                 '锚位在启动时定（§3.8 修订）：CRuby 无 DOM 取不到启动器槽位 → ' \
+                 '退化为兜底几何级联序 0，与窗口位置无关')
 
     html = render_html
     assert_includes html, 'zui-iconform zui-iconform-about', 'tile 挂钩类（契约）'
     assert_includes html, 'zui-iconform-glyph', '默认 icon_view：glyph（D7 兼容降级）'
     assert_includes html, '◈', 'glyph 取 app_icon'
-    assert_includes html, 'left:200px;top:120px', 'tile 定位于驻留几何（世界坐标）'
+    assert_includes html, 'left:120px;top:90px', 'tile 定位于驻留几何（世界坐标）'
     refute_includes html, 'panel-head', '窗口本体不渲染（form 分派）'
   end
 
@@ -209,8 +210,8 @@ class ZuiShellTest < Minitest::Test
     @shell.morph_to_icon(b)
     assert_includes render_html, 'zui-iconform zui-iconform-morph_test_2',
                     '多实例 id 的 # 消毒为 _（与 win_frame_class 同规则）'
-    assert_equal({ x: 148, y: 148 }, b.icon_geometry,
-                 '级联序 1：窗口位置 + 24 错开（a 已驻留占序 0 位）')
+    assert_equal({ x: 144, y: 114 }, b.icon_geometry,
+                 '级联序 1（§3.8 修订：锚位在启动时定，CRuby 兜底几何 + 24 错开）')
   end
 
   def test_icon_drag_reposition_writes_resident_geometry
@@ -231,6 +232,73 @@ class ZuiShellTest < Minitest::Test
     assert_equal :window, inst.form, '图标形态单例再启动 = 涨回窗口（morph 恢复备份几何）'
     assert_includes @shell.wm.windows, :about
     assert_equal({ x: 200, y: 120, w: 380, h: 280 }, @shell.wm.geometry(:about))
+  end
+
+  # ── Z1.5 修订（§3.8 表征互斥 + 槽位恒定，2026-09-16 用户复查）──────
+
+  def test_launcher_yields_slot_while_instance_exists
+    html = render_html
+    assert_includes html, 'd-icon d-icon-app-about', '无实例：启动器在位（带槽位挂钩类）'
+
+    inst = @shell.launch_app(:about)
+    refute_includes render_html, 'd-icon-app-about',
+                    '表征互斥：有实例（窗口形态）时启动器让位——一个应用不出现两个图标'
+
+    @shell.morph_to_icon(inst)
+    html = render_html
+    refute_includes html, 'd-icon-app-about', '收起态：槽位由实例的图标形态接管'
+    assert_includes html, 'zui-iconform zui-iconform-about'
+
+    @shell.quit_app(:about)
+    assert_includes render_html, 'd-icon-app-about', '退出后启动器回归'
+  end
+
+  def test_close_collapses_to_icon_instead_of_disposing
+    inst = @shell.launch_app(:about)
+    @shell.close_window(:about)
+
+    assert_equal :icon, inst.form, '✕/⌘W 在 ZUI = 收起为图标（不销毁实例）'
+    assert_same inst, @shell.registry.instance(:about), '实例仍在 registry'
+    assert_empty @shell.wm.windows, '窗口记录已摘'
+    assert_includes render_html, 'zui-iconform zui-iconform-about', '还原为图标'
+  end
+
+  def test_quit_app_disposes_instance_and_file_icon_route_untouched
+    inst = @shell.launch_app(:about)
+    @shell.morph_to_icon(inst)
+    @shell.quit_app(:about)
+
+    assert_nil @shell.registry.instance(:about), '真退出：实例销毁（D3 close 语义）'
+    refute_includes render_html, 'zui-iconform-about'
+    assert_empty @shell.wm.windows
+  end
+
+  def test_quit_active_app_prefers_window_then_icon_form
+    a = @shell.launch_app(:about)
+    @shell.morph_to_icon(a)
+    @shell.quit_active_app
+    assert_nil @shell.registry.instance(:about), '无窗口时退最近收起的图标形态实例'
+
+    @shell.stub(:now_ms, 9000) { @shell.launch_app(:files) }
+    @shell.quit_active_app
+    assert_nil @shell.registry.instance(:files), '有窗口时退活动窗口'
+  end
+
+  def test_menubar_has_quit_entry
+    apps_menu = @shell.menubar_data.find { |menu| menu[:label] == '应用' }
+    labels = apps_menu[:items].map { |item| item[:label] }.compact
+    assert_includes labels, '退出当前应用 ⌘Q', '⌘Q 之外的可发现性入口'
+  end
+
+  def test_anchor_assigned_at_launch_not_at_minimize
+    inst = @shell.launch_app(:about)
+    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
+                 '锚位在启动时定（槽位恒定不变量）：CRuby 取不到启动器槽位 → 兜底级联')
+
+    @shell.wm.place(:about, { x: 700, y: 500, w: 380, h: 280 })
+    @shell.morph_to_icon(inst)
+    assert_equal({ x: 120, y: 90 }, inst.icon_geometry,
+                 '窗口后来移动不影响锚位——缩回的是图标原本所在处')
   end
 
   def test_restore_right_after_minimize_not_eaten_by_dedup

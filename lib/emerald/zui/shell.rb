@@ -78,6 +78,52 @@ module Emerald
         end
       end
 
+      # ── 表征互斥的图标网格（PLAN §3.8 修订 2026-09-16）───────
+      #
+      # 同一对象任意时刻只有一个表征在场上：应用有实例时其启动器图标让位
+      # （槽位交给实例的图标形态；窗口形态时槽位是空的——图标"变成"窗口
+      # 飞走了）。修正前启动器与实例 tile 并存 = 一个应用两个图标（用户
+      # 复查指出的缺陷）
+      def icon_grid
+        morph_tick # 读即订阅：实例增删（launch/quit）后启动器让位/回归
+        box(css_class: 'icon-grid') do
+          @registry.apps.each do |app|
+            app_icon(app) unless app_has_instances?(app[:id])
+          end
+          desktop_entries.each { |node| file_icon(node) }
+        end
+      end
+
+      # 该应用是否有存活实例（任意形态）——启动器让位判定
+      def app_has_instances?(app_id)
+        @registry.each_running.any? { |inst| inst.class.app_id == app_id.to_sym }
+      end
+
+      # 每应用启动器挂钩类：d-icon-app-<app_id> 供启动形变测量槽位（§3.9 形变
+      # 源元素）与测试查询；sanitize 与 win_frame_class 同规则
+      def launcher_class(key)
+        base = icon_tile_class(key) # 父类：含选中态后缀
+        return base unless key.start_with?('app:')
+
+        base.sub('d-icon', "d-icon d-icon-app-#{sanitize_win_id(key.delete_prefix('app:'))}")
+      end
+
+      def app_icon(app)
+        key = "app:#{app[:id]}"
+        icon_tile(key, glyph: app[:icon].to_s, name: app[:title].to_s,
+                  on_open: -> { launch_app(app[:id]) })
+      end
+
+      # 与父类同构的图标块，唯 css_class 走 launcher_class（挂钩类）
+      def icon_tile(key, glyph:, name:, on_open:)
+        box(css_class: launcher_class(key),
+            on_click: ->(_e) { self.selected_icons = [key] },
+            on_dblclick: on_open) do
+          box(css_class: 'd-icon-glyph') { glyph }
+          label(css_class: 'd-icon-name') { name }
+        end
+      end
+
       # 窗口渲染循环（PLAN §3.8 form 分派）：:window 形态走窗口框原路径
       # （window_frame 与 wm.frame 同款接线，唯 on_minimize 改接形态切换）；
       # :icon 形态不渲染窗口本体（wm 只登记窗口形态实例），其 live tile 见
@@ -207,14 +253,13 @@ module Emerald
         nil
       end
 
-      # 启动应用并开窗（父类链路上两段增补）：
-      # ① 去重守卫（§8「双击图标双触发」已三次复现，每次双击恰好 +2 窗）——
-      #    同应用无参 launch 在 LAUNCH_DEDUP_MS 窗内合并为一次并聚焦已有窗；
-      #    带参启动（open_file 路由等）不走守卫，避免误吞连开不同文件。
-      #    根因定位归调查路线，此为 ZuiShell 侧去重（红线：不动 citrine）
-      # ② 图标形态的单例再启动 = 涨回窗口（morph 恢复备份几何）——先于去重
-      #    判定，不走父类 wm.open 默认几何，否则窗口记录在 wm 却因 form
-      #    守卫不渲染；且最小化后立刻再启动不被去重窗误吞
+      # 启动应用（§3.8 修订：**字面意义的"图标变成窗口"**）：
+      # ① 去重守卫（§8「双击图标双触发」）——同应用无参 launch 在
+      #    LAUNCH_DEDUP_MS 窗内合并；
+      # ② 单例图标形态再启动 = 涨回窗口（morph 恢复备份几何）；
+      # ③ 建实例 → 锚位取**启动器槽位** → form 先置 :window（启动器随之让位，
+      #    表征互斥）→ 幽灵从图标矩形飞涨到窗口矩形 → 收尾 wm.open 出窗。
+      # CRuby/无槽位 → 直接开窗（Morph 契约与槽位测量的兜底路径）
       def launch_app(id, **argv)
         return super if argv.any?
 
@@ -229,21 +274,151 @@ module Emerald
         seen = @launch_seen[key]
         if seen && now - seen.first < LAUNCH_DEDUP_MS &&
            (live = @registry.instance(seen.last))
-          @wm.focus(live.win_id) # 与父类单例语义对齐：重复启动聚焦已有窗
+          restore_or_focus(live)
           return live
         end
 
-        inst = super
+        inst = @registry.launch(key) # 只建实例（父类 D3/R2 语义）
         @launch_seen[key] = [now, inst.win_id]
+        if @wm.windows.include?(inst.win_id) # 单例命中：已有窗，聚焦即可
+          inst.form = :window
+          @wm.focus(inst.win_id)
+          return inst
+        end
+
+        open_with_morph(inst)
         inst
       end
 
-      # 关闭链路（父类 wm.close + registry.dispose）增补一段：摘形变重入
-      # 守卫——实例在形变动画中途被注销（✕ 快捷键竞态、卸载应用等）时，
-      # on_done 晚到不再残留守卫位（dispose 清理，§3.8 close 链路不变）
+      # 带形变的开窗：锚位 → form :window → bump morph_tick（启动器让位 +
+      # 形变期两端都不渲染，只有幽灵）→ 幽灵从图标矩形飞涨到窗口矩形 →
+      # wm.open（渲染仍被 @morphing 压着）→ 收尾 finish_morph 出窗
+      def open_with_morph(inst)
+        assign_anchor(inst)
+        inst.form = :window
+        g = geometry_for(inst)
+        slot = launcher_rect_for(inst.class.app_id)
+        self.morph_tick = morph_tick + 1
+        if slot
+          @morphing[inst.win_id] = true
+          fly_morph(inst, from: slot.merge(radius: 12), to: g.merge(radius: 10),
+                    from_class: "d-icon-app-#{sanitize_win_id(inst.class.app_id)}")
+        end
+        @wm.open(inst.win_id, title: inst.class.app_title, geometry: g)
+        inst
+      end
+
+      # 锚位（§3.8 槽位恒定不变量：图标在哪，窗口就从哪长出、缩回哪去）：
+      # 首个实例取**启动器槽位**（DOM 实测世界矩形）；同应用已有实例或槽位
+      # 不可测 → 级联兜底。锚位一经确定即永驻（可拖拽换位）
+      def assign_anchor(inst)
+        return if inst.icon_geometry
+
+        slot = launcher_rect_for(inst.class.app_id)
+        seq = @registry.each_running.count do |other|
+          !other.equal?(inst) && other.class.app_id == inst.class.app_id
+        end
+        if slot && seq.zero?
+          inst.icon_geometry = { x: slot[:x], y: slot[:y] }
+        else
+          inst.icon_geometry = AppForm.icon_slot(slot || FALLBACK_GEOMETRY, seq)
+        end
+      end
+
+      # 启动器槽位的世界矩形（DOM 实测：图标与世界容器 rect 之差 ÷ zoom——
+      # 两个 rect 都在屏幕空间，相减即世界位移的屏幕投影，天然免疫相机
+      # transform）。CRuby 无 DOM → nil（形变与槽位退化为级联兜底）。
+      # ⚠️ 选择器一律走 Ruby 字符串 → Native 方法传参：**不要**把 `#{...}`
+      # 写进 backtick JS 的字符串字面量里（Opal 下插值不求值，实参变字面
+      # "sel"，querySelector 落空——本方法浏览器实证踩坑）
+      def launcher_rect_for(app_id)
+        return nil unless defined?(Opal)
+
+        sel = ".icon-grid .d-icon-app-#{sanitize_win_id(app_id)}"
+        doc = Native(`document`)
+        el = doc.querySelector(sel)
+        world = @world_node.dom
+        return nil if el.nil? || world.nil?
+
+        a = el.getBoundingClientRect
+        b = world.getBoundingClientRect
+        z = camera.get[:zoom]
+        { x: (a[:left] - b[:left]) / z, y: (a[:top] - b[:top]) / z,
+          w: a[:width] / z, h: a[:height] / z }
+      end
+
+      # 命中已有实例时的复用：图标形态 → 涨回窗口；窗口形态 → 聚焦
+      def restore_or_focus(inst)
+        if inst.form == :icon
+          morph_to_window(inst)
+        elsif @wm.windows.include?(inst.win_id)
+          @wm.focus(inst.win_id)
+        end
+      end
+
+      # 关闭链路（ZUI 修订 2026-09-16）：✕ / ⌘W = **收起为图标**（形变缩小
+      # 还原为图标，实例留在 registry）——用户定调「关闭/最小化都是窗口
+      # 变形还原为图标」。真正的退出走 quit_app（⌘Q / 菜单栏「退出当前
+      # 应用」）。图标形态实例无 wm 记录（close_active_window 取 wm 序，
+      # 天然不可达）
       def close_window(win_id)
+        inst = @registry.instance(win_id)
+        return super unless inst && inst.form == :window
+
+        morph_to_icon(inst)
+      end
+
+      # 退出应用（真销毁，D3 close 语义）：窗口态与收起态都可退。摘形变
+      # 守卫/去重记录 → 窗口形态先摘窗 → dispose → 启动器回归（icon_grid
+      # 的表征互斥判定订阅 morph_tick）
+      def quit_app(win_id)
+        inst = @registry.instance(win_id)
+        return unless inst
+
         @morphing.delete(win_id)
+        @launch_seen.delete(inst.class.app_id)
+        @wm.close(win_id) if inst.form == :window
+        @registry.dispose(win_id)
+        self.morph_tick = morph_tick + 1
+        nil
+      end
+
+      # ⌘Q / 菜单入口：优先活动窗口，无窗则退最近收起的图标形态实例
+      def quit_active_app
+        top = @wm.windows.last
+        return quit_app(top) if top
+
+        iconic = @registry.each_running.to_a.reverse.find { |inst| inst.form == :icon }
+        quit_app(iconic.win_id) if iconic
+      end
+
+      # 全局快捷键：父类（⌘W 收起、⌘1..9 聚焦）之上追加 ⌘Q = 退出应用——
+      # ZUI 下 ✕/⌘W 只收起，退出必须另有出口（用户拍板：⌘Q + 菜单项）
+      def register_global_hotkeys
         super
+        Emerald.hotkey.register('meta+q') { quit_active_app }
+      end
+
+      # 纯修饰键 keydown 不进 chord 解析：浏览器把单独按下的 ⌘/Shift/Alt 也
+      # 当 keydown 派发，emerald hotkey 的 chord 解析对 "meta+Meta" 会 raise
+      # （⌘Q 实测报错，不致命但有噪声）。根因属 emerald hotkey.rb，反哺候选
+      def dispatch_hotkey(ev)
+        return if %w[Meta Shift Alt Control CapsLock].include?(ev.key)
+
+        super
+      end
+
+      # 菜单栏：父类「应用/桌面」之上，在「应用」菜单尾部补「退出当前应用」
+      # （⌘Q 的可发现性入口；多实例再开一个入口也在同一菜单的启动项里）
+      def menubar_data
+        data = super
+        apps = data.find { |menu| menu[:label] == '应用' }
+        if apps
+          apps[:items] = apps[:items] + [{ separator: true },
+                                         { label: '退出当前应用 ⌘Q',
+                                           action: -> { quit_active_app } }]
+        end
+        data
       end
 
       private
@@ -353,6 +528,10 @@ module Emerald
         { position: 'absolute',
           left: "#{g[:x]}px", top: "#{g[:y]}px",
           width: "#{ICON_TILE_W}px", height: "#{ICON_TILE_H}px",
+          # z_index 必须 > .icon-grid 的 1（emerald 页面壳给图标网格设了
+          # z-index: 1）：tile 常驻启动器槽位，与网格同区重叠——不抬层就被
+          # 网格盖住、点击全被网格接走（双击涨回失效，浏览器实证踩坑）
+          z_index: 2,
           display: 'flex', flex_direction: 'column', align_items: 'center',
           justify_content: 'center', gap: '6px',
           background: 'rgba(17, 21, 31, .88)', border: '1px solid #232b3b',
